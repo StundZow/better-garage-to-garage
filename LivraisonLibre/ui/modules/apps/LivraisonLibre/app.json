@@ -1,0 +1,22 @@
+{
+  "domElement": "<livraison-libre></livraison-libre>",
+  "name": "Livraison Libre",
+  "types": [
+    "ui.apps.categories.utility"
+  ],
+  "description": "Livraisons de véhicules en freeroam : destinations aléatoires ou points perso, zone P au sol, validation au frein à main, filtres de véhicules, stats.",
+  "css": {
+    "right": "12px",
+    "top": "90px",
+    "width": "400px",
+    "height": "640px",
+    "min-width": "330px",
+    "min-height": "160px"
+  },
+  "author": "StundZow",
+  "version": "1.2.0",
+  "directive": "livraisonLibre",
+  "category": "Gameplay",
+  "isAuxiliary": false,
+  "interactive": "required"
+}

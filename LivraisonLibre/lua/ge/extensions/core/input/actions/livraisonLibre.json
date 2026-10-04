@@ -1,0 +1,6 @@
+{
+"livraisonLibre_toggleUI"   :{"cat":"gameplay", "order": 90, "ctx": "tlua", "onDown": "if livraisonLibre then livraisonLibre.toggleUI() end", "title": "Livraison Libre : afficher / réduire le panneau", "desc": "Agrandit ou réduit le panneau de l'app Livraison Libre" },
+"livraisonLibre_startStop"  :{"cat":"gameplay", "order": 91, "ctx": "tlua", "onDown": "if livraisonLibre then livraisonLibre.toggle() end", "title": "Livraison Libre : lancer / arrêter", "desc": "Lance ou arrête les livraisons" },
+"livraisonLibre_skip"       :{"cat":"gameplay", "order": 92, "ctx": "tlua", "onDown": "if livraisonLibre then livraisonLibre.skip() end", "title": "Livraison Libre : passer la livraison", "desc": "Abandonne la livraison en cours et passe à la suivante" },
+"livraisonLibre_newDest"    :{"cat":"gameplay", "order": 93, "ctx": "tlua", "onDown": "if livraisonLibre then livraisonLibre.rerollDestination() end", "title": "Livraison Libre : nouvelle destination", "desc": "Choisit une autre destination depuis ta position, même véhicule" }
+}

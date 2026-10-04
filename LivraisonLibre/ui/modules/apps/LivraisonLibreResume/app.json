@@ -1,0 +1,21 @@
+{
+  "domElement": "<livraison-libre-resume></livraison-libre-resume>",
+  "name": "Livraison Libre - Résumé",
+  "types": [
+    "ui.apps.categories.utility"
+  ],
+  "description": "Écran de résumé des perfs affiché 5 secondes à la fin de chaque livraison (Livraison Libre). Invisible le reste du temps.",
+  "css": {
+    "left": "36%",
+    "top": "70px",
+    "width": "460px",
+    "height": "270px",
+    "min-width": "360px",
+    "min-height": "200px"
+  },
+  "author": "StundZow",
+  "version": "1.2.0",
+  "directive": "livraisonLibreResume",
+  "category": "Gameplay",
+  "isAuxiliary": false
+}
