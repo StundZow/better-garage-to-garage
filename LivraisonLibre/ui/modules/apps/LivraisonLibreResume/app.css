@@ -65,7 +65,10 @@ livraison-libre-resume { display: block; width: 100%; height: 100%; pointer-even
 
 .llr-records { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .llr-rec, .llr-streak { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
-.llr-rec { color: #2b1e00; background: linear-gradient(180deg, #ffd36b, #f2b632); }
+.llr-rec { display: inline-flex; align-items: center; gap: 5px; color: #2b1e00; background: linear-gradient(180deg, #ffd36b, #f2b632);
+  box-shadow: 0 0 12px rgba(255, 200, 60, 0.45); animation: llr-rec-pop 0.5s cubic-bezier(.2, 1.6, .4, 1) both; }
+.llr-rec svg { width: 15px; height: 15px; fill: currentColor; flex: 0 0 auto; }
+@keyframes llr-rec-pop { from { transform: scale(0.6); opacity: 0; } to { transform: none; opacity: 1; } }
 .llr-streak { color: var(--llr-text); background: rgba(255, 255, 255, 0.08); border: 1px solid var(--llr-line); }
 
 .llr-stars { display: flex; gap: 5px; margin-top: 10px; }

@@ -182,7 +182,8 @@ livraison-libre { display: block; width: 100%; height: 100%; }
 .ll-result-stats > div { flex: 1 1 0; text-align: center; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 6px 4px; }
 .ll-result-stats b { display: block; font-size: 15px; }
 .ll-result-stats span { font-size: 10.5px; color: var(--ll-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.ll-record { margin-top: 8px; color: var(--ll-yellow); font-weight: 700; }
+.ll-record { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--ll-yellow); font-weight: 700; }
+.ll-record svg { width: 18px; height: 18px; fill: currentColor; flex: 0 0 auto; }
 
 /* ---------- onglets ---------- */
 .ll-tabs { display: flex; padding: 6px 6px 0; gap: 2px; border-bottom: 1px solid var(--ll-line); flex: 0 0 auto; }

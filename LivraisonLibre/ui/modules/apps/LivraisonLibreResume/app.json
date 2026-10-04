@@ -9,12 +9,12 @@
     "left": "36%",
     "top": "70px",
     "width": "460px",
-    "height": "270px",
+    "height": "300px",
     "min-width": "360px",
     "min-height": "200px"
   },
   "author": "StundZow",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "directive": "livraisonLibreResume",
   "category": "Gameplay",
   "isAuxiliary": false

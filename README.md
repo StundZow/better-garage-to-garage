@@ -6,7 +6,7 @@
 
 Des livraisons de véhicules en freeroam pour **BeamNG.drive**, façon « garage to garage » — sauf que c'est toi qui choisis les lieux, les distances, les voitures et le trafic.
 
-[**⬇ Télécharger le mod**](https://github.com/StundZow/beamng-livraison-libre/releases/latest/download/LivraisonLibre.zip) · [Releases](https://github.com/StundZow/beamng-livraison-libre/releases)
+[**⬇ Télécharger le mod**](https://github.com/StundZow/better-garage-to-garage/releases/latest/download/LivraisonLibre.zip) · [Releases](https://github.com/StundZow/better-garage-to-garage/releases)
 
 <img src="screenshots/01_mission.png" width="720" alt="Panneau de mission et écran de résumé">
 
@@ -33,7 +33,7 @@ Parce qu'il tourne toujours entre les mêmes garages. Ici les destinations vienn
 - ⏱️ **Perfs honnêtes** : chrono lancé à la 1re accélération et arrêté à 50 m de la zone — le stationnement est mesuré à part
 - 🚓 **Trafic et police** : sans trafic, avec trafic, patrouilles (ratio police / civils réglable) ou recherché, avec **jusqu'à 5 étoiles** qui montent tant que tu fuis
 - 🔕 **Les PNJ ignorent les sirènes** pendant les livraisons — ils continuent de rouler au lieu de se ranger — et la police est écartée à moins de 100 m de l'arrivée pour te garer tranquille
-- 📊 **Écran de résumé** séparé, affiché de 3 à 15 s : temps, moyenne, distance, étoiles atteintes et temps survécu en poursuite, records
+- 📊 **Écran de résumé** séparé, affiché de 3 à 15 s : temps, moyenne, distance, étoiles atteintes et temps survécu en poursuite, et une 🏆 coupe quand tu bats un record
 - 📝 **Journal de chaque livraison** en CSV (s'ouvre dans Excel) : véhicule(s), distance, vitesses, resets, dégâts, changements de véhicule, trafic, police…
 - 💾 **Tous les réglages sauvegardés** ; pendant une mission, le panneau n'affiche que la mission en cours
 
@@ -47,7 +47,7 @@ Parce qu'il tourne toujours entre les mêmes garages. Ici les destinations vienn
 
 ## Prise en main
 
-1. [Télécharge `LivraisonLibre.zip`](https://github.com/StundZow/beamng-livraison-libre/releases/latest/download/LivraisonLibre.zip) et dépose-le **tel quel** (sans le dézipper) dans ton dossier de mods : `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\`. Fais-le jeu fermé : BeamNG recharge les mods à chaud et n'aime pas qu'on les remplace en pleine partie.
+1. [Télécharge `LivraisonLibre.zip`](https://github.com/StundZow/better-garage-to-garage/releases/latest/download/LivraisonLibre.zip) et dépose-le **tel quel** (sans le dézipper) dans ton dossier de mods : `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\`. Fais-le jeu fermé : BeamNG recharge les mods à chaud et n'aime pas qu'on les remplace en pleine partie.
 2. Lance une map en **freeroam**.
 3. Échap → **UI Apps** → ajoute **Livraison Libre** (le panneau) et **Livraison Libre - Résumé** (l'écran de perfs), et place-les où tu veux. Onglet **Paramètres** → *Afficher un aperçu* t'aide à caser le résumé.
 4. Règle tes lieux, véhicules et trafic dans les onglets, puis clique **Lancer les livraisons**.
