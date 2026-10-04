@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="icon.png" width="96" alt="Icône Livraison Libre">
+<img src="icon.png" width="96" alt="Icône Better Garage to Garage">
 
-# Livraison Libre
+# Better Garage to Garage
 
 Des livraisons de véhicules en freeroam pour **BeamNG.drive**, façon « garage to garage » — sauf que c'est toi qui choisis les lieux, les distances, les voitures et le trafic.
 
