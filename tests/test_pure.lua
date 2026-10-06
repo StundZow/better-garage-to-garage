@@ -311,10 +311,13 @@ check(timing.fallback(3000, 'moyen') > timing.fallback(3000, 'impossible'), 'sec
 print('-- trajet routier (graph.route)')
 local gr = graph.build((citygen.city(9, 120)))
 local spots = loc.buildRoadSpots(gr)
-local okRoutes = 0
+local okRoutes, linked = 0, 0
 for i = 1, 30 do
   local a, b = spots[(i * 7) % #spots + 1], spots[(i * 13) % #spots + 1]
   local pts = graph.route(gr, a, b)
+  local reachable = loc.candDist(gr, graph.dijkstra(gr, graph.sourcesFor(gr, a.e, a.t, 0)), b, a) ~= nil
+  if reachable then linked = linked + 1 end
+  if not reachable and pts == nil then okRoutes = okRoutes + 1 end -- deux zones non reliées : pas de trajet
   if pts then
     local len = 0
     for k = 1, #pts - 1 do len = len + math.sqrt((pts[k + 1].x - pts[k].x) ^ 2 + (pts[k + 1].y - pts[k].y) ^ 2 + (pts[k + 1].z - pts[k].z) ^ 2) end
@@ -324,7 +327,7 @@ for i = 1, 30 do
     if startOk and endOk and d and math.abs(len - d) < 1 then okRoutes = okRoutes + 1 end
   end
 end
-check(okRoutes == 30, 'trajet du départ à l arrivée, de la même longueur que la distance routière', okRoutes)
+check(okRoutes == 30 and linked >= 20, 'trajet du départ à l arrivée, de la même longueur que la distance routière (ou aucun si non relié)', okRoutes .. '/' .. linked)
 
 print('-- performance (grande grille)')
 local bigNodes = citygen.city(110, 90)
