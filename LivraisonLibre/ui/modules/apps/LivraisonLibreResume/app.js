@@ -13,6 +13,8 @@ angular.module('beamng.apps')
 
       scope.visible = false
       scope.leaving = false
+      scope.live = {on: false, stars: 0}
+      var liveTimer = null
       scope.sum = null
       scope.progress = 1
 
@@ -68,10 +70,29 @@ angular.module('beamng.apps')
         }, 100)
       }
 
+      // étoiles en direct : le HUD du mod est envoyé toutes les 0,2 s pendant une session de livraisons
+      scope.$on('LivraisonLibreHud', function (event, data) {
+        scope.$evalAsync(function () {
+          if (!data || !data.phase) return
+          scope.live.on = true
+          scope.live.stars = Math.max(0, Math.min(5, Math.round(+data.stars || 0)))
+          if (liveTimer) $timeout.cancel(liveTimer)
+          liveTimer = $timeout(function () { scope.live.on = false; scope.live.stars = 0 }, 1500) // plus de HUD = session arrêtée
+        })
+      })
+      scope.$on('LivraisonLibreState', function (event, data) {
+        scope.$evalAsync(function () {
+          if (data && !data.session) { scope.live.on = false; scope.live.stars = 0 }
+        })
+      })
+
       scope.$on('LivraisonLibreSummary', function (event, data) {
         scope.$evalAsync(function () { show(data || {}) })
       })
-      scope.$on('$destroy', stop)
+      scope.$on('$destroy', function () {
+        stop()
+        if (liveTimer) $timeout.cancel(liveTimer)
+      })
     }
   }
 }])
