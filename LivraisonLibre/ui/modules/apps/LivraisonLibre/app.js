@@ -34,7 +34,7 @@ angular.module('beamng.apps')
       scope.tabs = [
         { id: 'trajet', label: 'Trajet', icon: 'M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z' },
         { id: 'vehicules', label: 'Véhicules', icon: 'M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z' },
-        { id: 'police', label: 'Police', icon: 'M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 6l1.18 2.41 2.65.38-1.92 1.87.45 2.64L12 13.05l-2.36 1.25.45-2.64-1.92-1.87 2.65-.38L12 7z' },
+        { id: 'police', label: 'Difficulté', icon: 'M20.38 8.57l-1.23 1.85a8 8 0 01-.22 7.58H5.07A8 8 0 0115.58 6.85l1.85-1.23A10 10 0 003.35 19a2 2 0 001.72 1h13.85a2 2 0 001.74-1 10 10 0 00-.27-10.44zm-9.79 6.84a2 2 0 002.83 0l5.66-8.49-8.49 5.66a2 2 0 000 2.83z' },
         { id: 'plus', label: 'Plus', icon: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z' }
       ]
       // anciens onglets (avant la 1.4) -> nouveaux
@@ -166,6 +166,7 @@ angular.module('beamng.apps')
           return
         }
         scope.push()
+        api('requestVehicles')
       }
       scope.setVeh = function (key, value) {
         scope.s.veh[key] = value
@@ -175,6 +176,8 @@ angular.module('beamng.apps')
       // police réglée pendant la livraison
       var starsTimer = null
       scope.missionPolice = function (mode) {
+        $timeout.cancel(starsTimer)
+        starsTimer = null
         api('setMissionPolice', mode, +scope.ui.mStars || 1)
       }
       scope.missionStars = function () {
@@ -183,12 +186,22 @@ angular.module('beamng.apps')
       }
       // difficulté du temps limite (très facile -> impossible)
       var TIME_LEVELS = ['tres_facile', 'facile', 'moyen', 'dur', 'tres_dur', 'impossible']
-      scope.timeLevelLabel = function () {
+      scope.timeLevelLabel = function (idx) {
         var list = (scope.state && scope.state.meta && scope.state.meta.timeLevels) || []
-        var id = TIME_LEVELS[+scope.ui.timeLevelIdx] || 'moyen'
+        var id = TIME_LEVELS[+(idx === undefined ? scope.ui.timeLevelIdx : idx)] || 'moyen'
         for (var i = 0; i < list.length; i++) { if (list[i].id === id) return list[i].label }
         return id
       }
+      // pendant la livraison, avant le départ
+      var timeLevelTimer = null
+      scope.missionTimeLevel = function () {
+        $timeout.cancel(timeLevelTimer)
+        timeLevelTimer = $timeout(function () {
+          timeLevelTimer = null
+          api('setMissionTimeLevel', TIME_LEVELS[+scope.ui.mTimeIdx] || 'moyen')
+        }, 100)
+      }
+      scope.timeLevelIdxOf = function (id) { return Math.max(0, TIME_LEVELS.indexOf(id || 'moyen')) }
       scope.setTimeLevel = function () {
         scope.s.timeLevel = TIME_LEVELS[+scope.ui.timeLevelIdx] || 'moyen'
         scope.pushSoon()
@@ -201,12 +214,15 @@ angular.module('beamng.apps')
         var list = (scope.state && scope.state.meta && scope.state.meta.categories) || []
         list.forEach(function (c) { scope.s.veh[group][c.id] = value })
         scope.push()
+        api('requestVehicles')
       }
 
       // ---------- actions ----------
-      scope.start = function () { api('start') }
-      scope.call = function (fn) { api(fn) }
-      scope.callArg = function (fn, a) { api(fn, a) }
+      // un curseur bougé juste avant : ses réglages partent d'abord (les commandes arrivent dans l'ordre)
+      function flushPush () { if (pushPending) scope.push() }
+      scope.start = function () { flushPush(); api('start') }
+      scope.call = function (fn) { flushPush(); api(fn) }
+      scope.callArg = function (fn, a) { flushPush(); api(fn, a) }
       scope.toggleCollapsed = function () {
         scope.ui.collapsed = !scope.ui.collapsed
         saveUi()
@@ -227,7 +243,7 @@ angular.module('beamng.apps')
       scope.doConfirm = function () {
         var c = scope.ui.confirm
         scope.ui.confirm = null
-        if (c) api(c.fn)
+        if (c) { flushPush(); api(c.fn) }
       }
 
       // ---------- points ----------
@@ -347,7 +363,7 @@ angular.module('beamng.apps')
         return 'Non'
       }
       scope.logoState = function () {
-        if (!scope.sess) return 'll-logo-idle'
+        if (!scope.sess) return ''
         if (scope.sess.phase === 'summary') return 'll-logo-green'
         if (scope.hud && scope.hud.inZone) return 'll-logo-blue'
         return ''
@@ -400,6 +416,7 @@ angular.module('beamng.apps')
           scope.sess = data.session || null
           if (!pushPending && scope.s) scope.ui.timeLevelIdx = Math.max(0, TIME_LEVELS.indexOf(scope.s.timeLevel || 'moyen'))
           if (scope.sess && scope.sess.police && !starsTimer) scope.ui.mStars = scope.sess.police.level || 1
+          if (scope.sess && scope.sess.timeLevelId && !timeLevelTimer) scope.ui.mTimeIdx = Math.max(0, TIME_LEVELS.indexOf(scope.sess.timeLevelId))
           if (!scope.sess) scope.hud = {}
           if (scope.vehModels.length) scope.refreshVehView()
           if (firstState) {
@@ -429,7 +446,9 @@ angular.module('beamng.apps')
         scope.$evalAsync(function () { scope.toggleCollapsed() })
       })
       scope.$on('$destroy', function () {
-        $timeout.cancel(pushTimer)
+        if (pushPending) scope.push()
+        $timeout.cancel(starsTimer)
+        $timeout.cancel(timeLevelTimer)
         $timeout.cancel(toastTimer)
       })
 

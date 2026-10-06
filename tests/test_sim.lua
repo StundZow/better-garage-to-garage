@@ -773,7 +773,7 @@ M.stop()
 M.setSettings({traffic = {npcChases = true}})
 
 print('-- v1.5 : temps restant (temps limite)')
-M.setSettings({timeLimit = true, avgSpeedKmh = 45, timeBonus = 60, autoNext = false, instantNext = false, traffic = {mode = 'keep', police = 'off'}})
+M.setSettings({timeLimit = true, avgSpeedKmh = 45, timeBonus = 60, minDist = 600, autoNext = false, instantNext = false, traffic = {mode = 'keep', police = 'off'}})
 M.start()
 frames(400)
 check(sess() and sess().phase == 'driving', 'en route (temps limite)')
@@ -786,7 +786,7 @@ check(sumEv and sumEv.ok and type(sumEv.timeLeft) == 'number' and sumEv.timeLeft
 check(sess().summary and sess().summary.timeLeft == sumEv.timeLeft, 'temps restant dans le bloc du panneau')
 check(type(lastRec().timeLeftS) == 'number' and lastRec().timeLeftS > 0, 'temps restant dans le journal', lastRec().timeLeftS)
 M.stop()
-M.setSettings({timeLimit = false, autoNext = true})
+M.setSettings({timeLimit = false, minDist = 300, autoNext = true})
 
 print('-- v1.6 : temps limite selon la difficulté')
 local limits = {}
@@ -810,6 +810,170 @@ end
 check(limits.tres_facile > limits.moyen and limits.moyen > limits.impossible, 'même livraison : moins de temps quand la difficulté monte',
   string.format('%.0f / %.0f / %.0f s', limits.tres_facile or -1, limits.moyen or -1, limits.impossible or -1))
 M.setSettings({timeLimit = false, timeLevel = 'moyen', autoNext = true})
+
+print('-- v1.7 : difficulté modifiable tant que le chrono n est pas lancé')
+M.setSettings({timeLimit = true, timeLevel = 'moyen', minDist = 600, autoNext = false, instantNext = false, traffic = {mode = 'keep', police = 'off'}})
+M.start()
+frames(400)
+check(sess() and sess().phase == 'driving' and sess().timeLevelId == 'moyen', 'livraison avec temps limite (moyen)')
+check(hud().chronoState == 'wait', 'chrono pas encore lancé')
+local tMoyen = sess().timeLimit
+M.setMissionTimeLevel('impossible')
+local tImp = sess().timeLimit
+check(sess().timeLevelId == 'impossible' and sess().timeLevel == 'Impossible' and tImp < tMoyen, 'avant le départ : difficulté changée et temps recalculé',
+  string.format('%.0f -> %.0f s', tMoyen, tImp))
+M.setMissionTimeLevel('tres_facile')
+check(sess().timeLimit > tMoyen, 'plus facile : plus de temps')
+M.setMissionTimeLevel('n_importe_quoi')
+check(sess().timeLevelId == 'tres_facile', 'niveau inconnu ignoré')
+-- autre véhicule avant le départ : le temps suit le nouveau véhicule (pas celui d'avant)
+local followsVeh, seen, nSeen = true, {}, 0
+for _ = 1, 6 do
+  M.rerollVehicle()
+  frames(40)
+  local kept = sess().timeLimit
+  M.setMissionTimeLevel('tres_facile')
+  if math.abs(sess().timeLimit - kept) > 1e-6 then followsVeh = false end
+  local key = string.format('%.3f', kept)
+  if not seen[key] then seen[key] = true; nSeen = nSeen + 1 end
+end
+check(sess().phase == 'driving' and hud().chronoState == 'wait' and followsVeh and nSeen > 1,
+  'autre véhicule avant le départ : temps recalculé pour ce véhicule', nSeen .. ' temps différents')
+-- on démarre : le chrono se lance, le choix n'est plus possible
+local v = getPlayerVehicle(0)
+v.pos = vec3(-3000, -3000, 10)
+v.vel = vec3(15, 0, 0)
+frames(60)
+v.vel = vec3(0, 0, 0)
+check(hud().chronoState ~= 'wait', 'chrono lancé après la 1re accélération', hud().chronoState)
+local tLocked = sess().timeLimit
+M.setMissionTimeLevel('impossible')
+check(sess().timeLimit == tLocked and sess().timeLevelId == 'tres_facile', 'après le départ : temps de la livraison inchangé')
+check(env.files['/settings/livraisonLibre/settings.json'].timeLevel == 'impossible', 'mais le choix est gardé pour la suivante')
+M.rerollVehicle()
+frames(40)
+check(sess().timeLimit == tLocked and sess().timeLevelId == 'tres_facile', 'après le départ : autre véhicule, même temps')
+M.stop()
+M.setSettings({timeLimit = false, timeLevel = 'moyen', minDist = 300, autoNext = true})
+
+print('-- relecture complète du mod : corrections')
+-- police du jeu : ses réglages sont remis comme avant à l'arrêt, même en « Ne pas toucher »
+env.policeVars = {strictness = 0.7, suspectFrequency = 0.5}
+M.setSettings({traffic = {mode = 'keep', police = 'off', npcChases = false}, autoNext = false, instantNext = false, timeLimit = false})
+M.start()
+frames(400)
+check(sess() and sess().phase == 'driving' and env.policeVars.suspectFrequency == 0, 'poursuites de PNJ coupées pendant les livraisons')
+M.stop()
+check(env.policeVars.suspectFrequency == 0.5 and env.policeVars.strictness == 0.7, 'réglages de la police du jeu remis à l arrêt',
+  tostring(env.policeVars.suspectFrequency) .. ' / ' .. tostring(env.policeVars.strictness))
+M.setSettings({traffic = {npcChases = true}})
+env.policeVars = {}
+
+-- arrêt juste après « Autre véhicule » : la livraison en cours est quand même notée au journal
+M.start()
+frames(400)
+drive(400, 15)
+local nJ = #journalRecs()
+M.rerollVehicle()
+frames(5)
+check(sess() and sess().phase == 'spawning', 'changement de véhicule en cours', sess() and sess().phase)
+M.stop()
+check(#journalRecs() == nJ + 1 and lastRec().result == 'Arrêtée', 'arrêt pendant le changement de véhicule : livraison notée « Arrêtée »', #journalRecs() - nJ)
+
+-- « Autre véhicule » qui tombe sur un véhicule impossible à faire apparaître (mod cassé) : on garde le sien
+env.models.broken = {Name = 'Broken', Type = 'Car', ['Body Style'] = 'Sedan', Years = {min = 2010, max = 2018}}
+table.insert(env.configs, cfg('broken', 'base'))
+M.onModActivated()
+M.start()
+frames(400)
+local hitBroken, keptVeh = false, nil
+for _ = 1, 60 do
+  if not sess() then break end
+  env.events.LivraisonLibreToast = nil
+  local before = sess().vehicle and sess().vehicle.model
+  M.rerollVehicle()
+  frames(40)
+  local t = env.events.LivraisonLibreToast
+  if t and tostring(t.msg):find('ne peut pas appara') then hitBroken, keptVeh = true, before break end
+end
+check(hitBroken and sess() and sess().phase == 'driving' and sess().vehicle.model == keptVeh,
+  'véhicule impossible à faire apparaître : la livraison continue avec le véhicule actuel', hitBroken)
+local brokenAgain = false
+for _ = 1, 20 do
+  M.rerollVehicle()
+  frames(40)
+  if sess() and sess().vehicle and sess().vehicle.model == 'broken' then brokenAgain = true end
+end
+check(sess() and not brokenAgain, 'ce véhicule n est plus tiré ensuite')
+M.stop()
+env.models.broken = nil
+table.remove(env.configs)
+M.onModActivated()
+
+-- recherché : « Nouvelle destination » ne remet pas à zéro une poursuite en cours
+M.setSettings({traffic = {mode = 'on', amount = 10, parked = 0, police = 'wanted', wantedLevel = 1, removeOnStop = true}})
+M.start()
+frames(80)
+frames(60 * 3)
+local pv2 = getPlayerVehicle(0).id
+check(env.wantedVeh == pv2, 'recherché au départ')
+env.pursuitMode = 2
+env.wantedVeh = nil
+M.rerollDestination()
+frames(60 * 4)
+check(sess().phase == 'driving' and env.wantedVeh == nil, 'nouvelle destination : la poursuite en cours continue (pas relancée)')
+-- « Autre véhicule » pendant une poursuite : le nouveau véhicule est toujours recherché
+M.rerollVehicle()
+env.pursuitMode = 0 -- le jeu remet à zéro le rôle du véhicule remplacé
+frames(60 * 4)
+check(sess().phase == 'driving' and env.wantedVeh == getPlayerVehicle(0).id, 'autre véhicule : toujours recherché')
+M.stop()
+env.pursuitMode = 0
+env.wantedVeh = nil
+
+-- arrêt pendant le chargement du trafic : il est retiré dès qu'il est prêt
+M.setSettings({traffic = {mode = 'on', amount = 10, parked = 0, police = 'patrol', removeOnStop = true}})
+M.start()
+for _ = 1, 400 do
+  if env.trafficReadyIn then break end
+  frames(1)
+end
+check(env.trafficReadyIn ~= nil and sess() and sess().loadingTraffic, 'trafic en cours de chargement')
+local d0 = env.traffic.deletes
+M.stop()
+check(env.traffic.deletes == d0, 'pas de suppression pendant le chargement (le jeu l ignorerait)')
+frames(60)
+check(env.traffic.deletes == d0 + 1 and env.traffic.amount == 0, 'trafic retiré dès qu il est prêt', env.traffic.amount)
+M.setSettings({traffic = {mode = 'keep', police = 'off'}})
+
+-- première livraison après remise à zéro : pas de « nouveau record »
+M.resetStats()
+M.setSettings({autoNext = false, instantNext = false})
+M.start()
+frames(400)
+drive(800, 20)
+deliverNow()
+frames(10)
+check(sess().phase == 'summary' and not sess().summary.record, 'toute première livraison : pas annoncée comme record')
+M.stop()
+
+-- validation éclair : une livraison ratée enchaîne aussi
+M.setSettings({timeLimit = true, timeLevel = 'impossible', autoNext = false, instantNext = true, validation = 'handbrake'})
+M.start()
+frames(400)
+local sawFail, chained = false, false
+local vf = getPlayerVehicle(0)
+vf.pos = vec3(-3000, -3000, 10)
+vf.vel = vec3(30, 0, 0)
+for _ = 1, 60 * 150 do
+  frames(1)
+  local ph = sess() and sess().phase
+  if ph == 'failed' then sawFail = true; getPlayerVehicle(0).vel = vec3(0, 0, 0) end
+  if sawFail and ph and ph ~= 'failed' then chained = true break end
+end
+check(sawFail and chained, 'livraison ratée : la suivante démarre aussi (validation éclair)', tostring(sawFail) .. ' / ' .. tostring(chained))
+M.stop()
+M.setSettings({timeLimit = false, timeLevel = 'moyen', autoNext = true, instantNext = false, validation = 'auto'})
 
 print('-- analyse de la map en échec : message clair, pas d exception, pas de spam')
 M.onClientPostStartMission('/levels/testcity/main.level.json')

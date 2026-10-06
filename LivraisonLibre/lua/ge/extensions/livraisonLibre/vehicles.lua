@@ -148,6 +148,8 @@ function M.transmissionFromText(t)
 end
 
 -- ... sinon les pièces de la config (.pc) : "xxx_transmission_6M", "_8A", "_7DCT", "_CVT", "sequential"...
+-- Seule la fin du nom de la pièce est lue (après "transmission", "transaxle", "gearbox" ou, à défaut,
+-- après le 1er mot) : le nom du modèle au début peut contenir "auto" ("autobello_transaxle_4M").
 function M.transmissionFromParts(parts)
   if type(parts) ~= 'table' then return nil end
   for slot, v in pairs(parts) do
@@ -155,11 +157,13 @@ function M.transmissionFromParts(parts)
       local sl = slot:lower()
       if sl:find('transmission') or sl:find('gearbox') or sl:find('transaxle') then
         local p = v:lower()
-        if p:find('seq') then return 'manual' end
+        p = p:match('^.-trans%a*(.*)$') or p:match('^.-gearbox(.*)$') or p:gsub('^[^_]+_', '')
+        local w = '_' .. p .. '_'
+        if p:find('seq') or w:find('_sq_') then return 'manual' end
         if p:find('dct') or p:find('cvt') or p:find('auto') or p:find('dsg') then return 'auto' end
         if p:find('manual') then return 'manual' end
-        if p:find('%dm$') or p:find('_m$') or p:find('%dm_') or p:find('_m_') then return 'manual' end
-        if p:find('%da$') or p:find('_a$') or p:find('%da_') or p:find('_a_') then return 'auto' end
+        if w:find('%dm_') or w:find('_m_') then return 'manual' end
+        if w:find('%da_') or w:find('_a_') then return 'auto' end
       end
     end
   end
@@ -269,7 +273,9 @@ function M.classify(cfg, model)
     ylo = ylo, yhi = yhi, yearsText = yearsText,
     w = w, l = l,
     value = tonumber(cfg.Value),
-    trans = M.transmissionFromText(cfg.Transmission),
+    -- électrique sans boîte indiquée ("Other") : se conduit comme une automatique
+    trans = M.transmissionFromText(cfg.Transmission)
+      or (((firstString(cfg.Propulsion) or firstString(model and model.Propulsion) or ''):lower():find('electric')) and 'auto' or nil),
     -- performances (temps limite selon la difficulté)
     perf = {
       top = tonumber(cfg['Top Speed']), z100 = tonumber(cfg['0-100 km/h']), power = tonumber(cfg.Power),

@@ -4,6 +4,21 @@ local M = {}
 
 local owned = false      -- le trafic actuel a été créé par le mod
 local ready = true
+local pendingRemoval = false -- arrêt demandé pendant que le trafic du mod se charge encore
+local savedVars = nil    -- réglages de la police du jeu avant les livraisons (remis à l'arrêt)
+local VAR_KEYS = {'strictness', 'suspectFrequency', 'roadblockFrequency', 'evadeTime', 'evadeRadius'}
+
+-- garde les réglages de la police du jeu avant le premier changement fait par le mod
+local function saveVars()
+  if savedVars then return end
+  local police = _G.gameplay_police
+  if not police or not police.getPursuitVars then return end
+  local ok, v = pcall(police.getPursuitVars)
+  if ok and type(v) == 'table' then
+    savedVars = {}
+    for _, k in ipairs(VAR_KEYS) do savedVars[k] = v[k] end
+  end
+end
 local POLICE_PROVIDER = 'livraisonLibrePolice'
 
 -- Code exécuté dans les véhicules de trafic (Lua véhicule).
@@ -95,6 +110,7 @@ function M.apply(t, levelName)
     })
   end
   ready = false
+  pendingRemoval = false
   local ok, tSetup, pSetup = pcall(gt.setupTrafficHelper, t.amount, {police = false, llPoliceCount = providerSet and policeCount or 0}, t.parked, {})
   if providerSet and gt.unregisterSpecialVehicleProvider then pcall(gt.unregisterSpecialVehicleProvider, POLICE_PROVIDER) end
   if not ok then
@@ -104,6 +120,7 @@ function M.apply(t, levelName)
   pcall(gt.setTrafficVars, {aiMode = 'traffic', enableRandomEvents = usePolice})
   local police = ext('gameplay_police')
   if police and police.setPursuitVars then
+    saveVars()
     pcall(police.setPursuitVars, {strictness = t.strictness, suspectFrequency = (t.npcChases ~= false) and 0.5 or 0})
   end
   owned = true
@@ -112,12 +129,24 @@ function M.apply(t, levelName)
   return 'done'
 end
 
-function M.onReady() ready = true end
+function M.onReady()
+  ready = true
+  -- arrêt demandé pendant le chargement : le trafic n'existait pas encore, on le retire maintenant
+  if pendingRemoval then
+    pendingRemoval = false
+    M.removeAll()
+  end
+end
 function M.isReady() return ready end
 function M.isOwned() return owned end
 
 -- Supprime tout le trafic et les voitures garées (créés par le mod ou non)
 function M.removeAll()
+  if owned and not ready then
+    -- le jeu crée encore le trafic du mod (un véhicule par image) : retiré dès qu'il est prêt
+    pendingRemoval = true
+    return
+  end
   local gt, gp = ext('gameplay_traffic'), ext('gameplay_parking')
   if gt and gt.deleteVehicles then pcall(gt.deleteVehicles) end
   if gp and gp.deleteVehicles then pcall(gp.deleteVehicles) end
@@ -348,10 +377,20 @@ function M.addHeavyPolice(group, share)
   return group
 end
 
+-- réglages de poursuite hors difficulté progressive : ceux du jeu avant les livraisons
+local function baseVars()
+  if not savedVars then return DEFAULT_PURSUIT_VARS end
+  return {
+    roadblockFrequency = savedVars.roadblockFrequency or DEFAULT_PURSUIT_VARS.roadblockFrequency,
+    evadeTime = savedVars.evadeTime or DEFAULT_PURSUIT_VARS.evadeTime,
+    evadeRadius = savedVars.evadeRadius or DEFAULT_PURSUIT_VARS.evadeRadius,
+  }
+end
+
 function M.resetTuning()
   if tune.stars ~= -1 then
     local police = _G.gameplay_police
-    if police and police.setPursuitVars then pcall(police.setPursuitVars, DEFAULT_PURSUIT_VARS) end
+    if police and police.setPursuitVars then pcall(police.setPursuitVars, baseVars()) end
   end
   tune = {stars = -1, aggr = {}, reinforceTimer = 5}
 end
@@ -366,7 +405,8 @@ function M.tunePolice(playerId, stars, dt)
     tune.stars = stars
     tune.aggr = {}
     if police.setPursuitVars then
-      pcall(police.setPursuitVars, t and {roadblockFrequency = t.roadblock, evadeTime = t.evadeTime, evadeRadius = t.evadeRadius} or DEFAULT_PURSUIT_VARS)
+      saveVars()
+      pcall(police.setPursuitVars, t and {roadblockFrequency = t.roadblock, evadeTime = t.evadeTime, evadeRadius = t.evadeRadius} or baseVars())
     end
   end
   if not t then return end
@@ -379,10 +419,12 @@ function M.tunePolice(playerId, stars, dt)
     if veh.isAi and isPolice(veh) and id ~= playerId then
       local chasing = veh.role and veh.role.flags and veh.role.flags.pursuit and veh.role.targetId == playerId
       if chasing then
-        if tune.aggr[id] ~= t.aggression then
+        -- le jeu remet sa propre agressivité à chaque changement d'action (poursuite, esquive, arrêt...)
+        local key = t.aggression .. '|' .. tostring(veh.role.actionName)
+        if tune.aggr[id] ~= key then
           local obj = getObjectByID(id)
           if obj then pcall(obj.queueLuaCommand, obj, 'ai.setAggression(' .. t.aggression .. ')') end
-          tune.aggr[id] = t.aggression
+          tune.aggr[id] = key
         end
       elseif not (veh.role and veh.role.flags and (veh.role.flags.roadblock or veh.role.flags.cooldown)) then
         idle[#idle + 1] = {id = id, veh = veh}
@@ -447,7 +489,10 @@ end
 -- police la prend en chasse, sirènes allumées (événement aléatoire du trafic). false = jamais.
 function M.setNpcChases(on)
   local police = _G.gameplay_police
-  if police and police.setPursuitVars then pcall(police.setPursuitVars, {suspectFrequency = on and 0.5 or 0}) end
+  if police and police.setPursuitVars then
+    saveVars()
+    pcall(police.setPursuitVars, {suspectFrequency = on and 0.5 or 0})
+  end
 end
 
 -- Police réglée en pleine livraison : 'off' (la police ne réagit plus à rien), 'patrol' (seulement
@@ -457,6 +502,7 @@ local savedStrictness = nil
 function M.setPoliceMode(vehId, mode, level, strictness)
   local police = _G.gameplay_police
   if not police or not police.setPursuitVars then return false end
+  saveVars()
   if mode == 'off' then
     if savedStrictness == nil then
       local ok, vars = pcall(police.getPursuitVars or function() end)
@@ -466,21 +512,32 @@ function M.setPoliceMode(vehId, mode, level, strictness)
     M.resetPursuit(vehId)
     return true
   end
-  local s = strictness or savedStrictness or 0.5
+  -- police remise en route : sévérité d'avant la coupure, sinon celle choisie (nil : inchangée)
+  local s = savedStrictness or strictness
   savedStrictness = nil
-  pcall(police.setPursuitVars, {strictness = s})
+  if s then pcall(police.setPursuitVars, {strictness = s}) end
   M.resetPursuit(vehId)
   if mode == 'wanted' then return M.setWanted(vehId, level) end
   return true
 end
 
--- Fin des livraisons : sévérité d'origine si la police avait été coupée
+-- Fin des livraisons : réglages de la police du jeu tels qu'avant (sévérité, poursuites de PNJ...)
 function M.restorePolice()
+  local police = _G.gameplay_police
   if savedStrictness ~= nil then
-    local police = _G.gameplay_police
     if police and police.setPursuitVars then pcall(police.setPursuitVars, {strictness = savedStrictness}) end
     savedStrictness = nil
   end
+  if savedVars then
+    if police and police.setPursuitVars then pcall(police.setPursuitVars, savedVars) end
+    savedVars = nil
+  end
+end
+
+-- Map quittée : le jeu remet lui-même ses réglages, rien à remettre ni à retirer plus tard
+function M.forget()
+  savedVars, savedStrictness, pendingRemoval = nil, nil, false
+  owned, ready = false, true
 end
 
 function M.pursuitMode(vehId)
@@ -489,6 +546,16 @@ function M.pursuitMode(vehId)
   local ok, data = pcall(police.getPursuitData, vehId)
   if ok and type(data) == 'table' and type(data.mode) == 'number' then return data.mode end
   return 0
+end
+
+-- recherché (rôle de suspect donné par le jeu) ou déjà poursuivi
+function M.isWanted(vehId)
+  if M.pursuitMode(vehId) > 0 then return true end
+  local gt = _G.gameplay_traffic
+  if not gt or not gt.getTrafficData or not vehId then return false end
+  local ok, data = pcall(gt.getTrafficData)
+  local v = ok and type(data) == 'table' and data[vehId]
+  return type(v) == 'table' and ((v.role and v.role.name) or v.roleName) == 'suspect'
 end
 
 function M.resetPursuit(vehId)
@@ -500,6 +567,8 @@ end
 function M.setWanted(vehId, level)
   local police = ext('gameplay_police')
   if not police or not police.setupPursuitGameplay or not vehId then return false end
+  -- déjà poursuivi : on ne relance pas (le jeu arrêterait la poursuite en cours)
+  if M.pursuitMode(vehId) > 0 then return true end
   local ok, res = pcall(police.setupPursuitGameplay, vehId, nil, {pursuitMode = M.modeForStars(level)})
   return ok and res == true
 end

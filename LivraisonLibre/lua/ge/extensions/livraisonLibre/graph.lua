@@ -1,6 +1,8 @@
 -- Livraison Libre - graphe routier
--- Construit un graphe non orienté à partir de map.getMap().nodes (liens stockés d'un seul côté
--- dans BeamNG), avec composantes connexes, index spatial des segments et Dijkstra borné.
+-- Construit un graphe à partir de map.getMap().nodes (liens stockés d'un seul côté dans BeamNG),
+-- avec composantes connexes, index spatial des segments et Dijkstra borné. Les sens uniques sont
+-- gardés sur chaque segment (on y roule de inNode vers l'autre noeud, comme le GPS du jeu) et les
+-- recherches peuvent en tenir compte (paramètre dir).
 -- Module "pur" : n'utilise que des nombres (x, y, z), testable hors du jeu.
 
 local M = {}
@@ -88,6 +90,9 @@ function M.build(mapNodes, opts)
           if not seen[key] and len <= MAX_EDGE_LEN then
             seen[key] = true
             ne = ne + 1
+            -- noeud d'entrée (sens de circulation) : forcément une des deux extrémités
+            local inNode = data.inNode ~= nil and g.idx[data.inNode] or nil
+            if inNode ~= a and inNode ~= b then inNode = nil end
             local e = {
               a = a, b = b,
               len = len,
@@ -96,7 +101,7 @@ function M.build(mapNodes, opts)
               oneWay = data.oneWay and true or nil,
               speed = tonumber(data.speedLimit),
               lanes = countLanes(data.lanes),
-              inNode = data.inNode and g.idx[data.inNode] or nil,
+              inNode = inNode,
             }
             g.edges[ne] = e
             local adjA, adjB = g.adj[a], g.adj[b]
@@ -115,10 +120,10 @@ function M.build(mapNodes, opts)
   return g
 end
 
--- Composantes connexes (BFS) + longueur totale de route par composante.
+-- Composantes connexes (BFS) + longueur totale de route et nombre de noeuds par composante.
 function M.buildComponents(g, tick)
   local step = ticker(tick)
-  local comp, compLen, compCount = {}, {}, 0
+  local comp, compLen, compNodes, compCount = {}, {}, {}, 0
   local queue = {}
   for s = 1, g.n do
     if not comp[s] then
@@ -143,9 +148,10 @@ function M.buildComponents(g, tick)
         end
       end
       compLen[c] = len
+      compNodes[c] = qt
     end
   end
-  g.comp, g.compLen, g.compCount = comp, compLen, compCount
+  g.comp, g.compLen, g.compNodes, g.compCount = comp, compLen, compNodes, compCount
   local best, bestLen = nil, -1
   for c = 1, compCount do
     if compLen[c] > bestLen then best, bestLen = c, compLen[c] end
@@ -228,21 +234,36 @@ function M.nearestEdge(g, px, py, pz, maxDist, filter, maxZ)
   return bestE, bestT, sqrt(bestD2)
 end
 
--- Sources Dijkstra pour un point posé sur l'arête ei au paramètre t (+ distance d'accès off).
-function M.sourcesFor(g, ei, t, off)
-  local e = g.edges[ei]
-  off = off or 0
-  return {
-    {node = e.a, d = t * e.len + off},
-    {node = e.b, d = (1 - t) * e.len + off},
-  }
+-- Sens de circulation. Les recherches prennent un paramètre dir :
+--   dir = 1  : en avant, depuis un départ (on ne prend un sens unique que depuis son inNode) ;
+--   dir = -1 : à rebours, depuis une arrivée (dist[n] = trajet légal de n jusqu'à l'arrivée) ;
+--   nil      : sens uniques ignorés (secours quand les données de la map sont incohérentes).
+-- Un point posé sur e peut-il être relié à l'extrémité n ? leaving : on roule du point vers n ;
+-- sinon de n vers le point. Toujours vrai sur une route à double sens.
+local function endOk(e, n, leaving)
+  if not (e.oneWay and e.inNode) then return true end
+  return (n == e.inNode) ~= leaving
 end
 
--- Dijkstra borné (tas binaire). Renvoie dist[nodeIndex] pour les noeuds atteints <= maxDist.
+-- Sources Dijkstra pour un point posé sur l'arête ei au paramètre t (+ distance d'accès off).
+-- dir = 1 : on part du point ; dir = -1 : on y arrive (sur un sens unique, une seule extrémité).
+function M.sourcesFor(g, ei, t, off, dir)
+  local e = g.edges[ei]
+  off = off or 0
+  local out = {}
+  if not dir or endOk(e, e.a, dir == 1) then out[#out + 1] = {node = e.a, d = t * e.len + off} end
+  if not dir or endOk(e, e.b, dir == 1) then out[#out + 1] = {node = e.b, d = (1 - t) * e.len + off} end
+  return out
+end
+
+-- Dijkstra borné (tas binaire). Renvoie dist[nodeIndex] pour les noeuds atteints <= maxDist, et
+-- capped = true si la borne a coupé la recherche (sinon tout ce qui est atteignable a été vu).
 -- prev (facultatif) : rempli avec prev[noeud] = segment par lequel on y arrive (pour retrouver le chemin).
-function M.dijkstra(g, sources, maxDist, prev)
+-- dir (facultatif) : sens de circulation, voir plus haut.
+function M.dijkstra(g, sources, maxDist, prev, dir)
   maxDist = maxDist or huge
   local dist = {}
+  local capped = false
   local hn, hd, hs = {}, {}, 0
 
   local function push(node, d)
@@ -279,38 +300,72 @@ function M.dijkstra(g, sources, maxDist, prev)
   end
 
   for _, s in ipairs(sources) do
-    if s.node and s.d <= maxDist and (dist[s.node] == nil or s.d < dist[s.node]) then
-      dist[s.node] = s.d
-      push(s.node, s.d)
+    if s.node and (dist[s.node] == nil or s.d < dist[s.node]) then
+      if s.d <= maxDist then
+        dist[s.node] = s.d
+        push(s.node, s.d)
+      else
+        capped = true
+      end
     end
   end
 
   local adj, edges = g.adj, g.edges
+  local fwd = dir == 1
   while hs > 0 do
     local u, du = pop()
     if du <= dist[u] then
       for _, ei in ipairs(adj[u]) do
         local e = edges[ei]
-        local v = (e.a == u) and e.b or e.a
-        local nd = du + e.len
-        if nd <= maxDist then
-          local dv = dist[v]
-          if dv == nil or nd < dv then
-            dist[v] = nd
-            if prev then prev[v] = ei end
-            push(v, nd)
+        -- sens unique : en avant on ne le prend que depuis son inNode, à rebours que depuis l'autre bout
+        local inN = dir and e.oneWay and e.inNode
+        if not inN or fwd == (u == inN) then
+          local v = (e.a == u) and e.b or e.a
+          local nd = du + e.len
+          if nd <= maxDist then
+            local dv = dist[v]
+            if dv == nil or nd < dv then
+              dist[v] = nd
+              if prev then prev[v] = ei end
+              push(v, nd)
+            end
+          else
+            capped = true
           end
         end
       end
     end
   end
-  return dist
+  return dist, capped
+end
+
+-- Distances d'un point posé sur l'arête ei (paramètre t) par chacune de ses extrémités, d'après une
+-- table dist. dir = 1 : dist part du départ, on arrive au point par l'extrémité ; dir = -1 : dist mène
+-- à l'arrivée, on quitte le point par l'extrémité. nil pour une extrémité non atteinte ou à contresens.
+function M.endDists(g, dist, ei, t, dir)
+  local e = g.edges[ei]
+  if not e or not dist then return nil, nil end
+  local da, db = dist[e.a], dist[e.b]
+  local viaA = da and (not dir or endOk(e, e.a, dir == -1)) and da + t * e.len or nil
+  local viaB = db and (not dir or endOk(e, e.b, dir == -1)) and db + (1 - t) * e.len or nil
+  return viaA, viaB
+end
+
+-- Trajet direct le long de l'arête ei, du paramètre t1 au paramètre t2 : longueur, ou nil si c'est à
+-- contresens d'un sens unique (dir non nil ; dir = nil : sens uniques ignorés).
+function M.alongEdge(g, ei, t1, t2, dir)
+  local e = g.edges[ei]
+  if not e then return nil end
+  if dir and e.oneWay and e.inNode then
+    if not ((e.inNode == e.a and t2 >= t1) or (e.inNode == e.b and t2 <= t1)) then return nil end
+  end
+  return abs(t2 - t1) * e.len
 end
 
 -- Trajet le plus court entre deux points attachés au graphe ({e, t} : segment et position sur ce
--- segment). Renvoie la liste des points du trajet {x, y, z, speed, drv, r} ; chaque point porte les
--- caractéristiques de la route qui part de lui (limitation en m/s, drivability, demi-largeur). nil si
--- aucun chemin.
+-- segment), dans le sens de circulation comme le GPS du jeu. Renvoie la liste des points du trajet
+-- {x, y, z, speed, drv, r} ; chaque point porte les caractéristiques de la route qui part de lui
+-- (limitation en m/s, drivability, demi-largeur). nil si aucun chemin.
 local function edgePoint(g, e, t)
   return g.x[e.a] + (g.x[e.b] - g.x[e.a]) * t, g.y[e.a] + (g.y[e.b] - g.y[e.a]) * t, g.z[e.a] + (g.z[e.b] - g.z[e.a]) * t
 end
@@ -325,18 +380,26 @@ function M.route(g, from, to, maxDist)
     pts[#pts + 1] = {x = x, y = y, z = z, speed = e and e.speed, drv = e and e.drv,
       r = e and (g.r[e.a] + g.r[e.b]) * 0.5}
   end
-  if from.e == to.e then
+  local function direct()
     local x, y, z = edgePoint(g, ef, ft); add(x, y, z, ef)
     x, y, z = edgePoint(g, et, tt); add(x, y, z, nil)
     return pts
   end
-  local prev = {}
-  local dist = M.dijkstra(g, M.sourcesFor(g, from.e, ft, 0), maxDist, prev)
-  local da, db = dist[et.a], dist[et.b]
-  local viaA = da and da + tt * et.len
-  local viaB = db and db + (1 - tt) * et.len
-  local endNode
-  if viaA and (not viaB or viaA <= viaB) then endNode = et.a elseif viaB then endNode = et.b else return nil end
+  local sameEdge = from.e == to.e
+  if sameEdge and M.alongEdge(g, from.e, ft, tt, 1) then return direct() end
+  -- dans le sens de circulation ; sinon (sens uniques sans issue dans les données de la map) sans
+  -- en tenir compte, le GPS passant alors lui aussi à contresens
+  local prev, endNode
+  for pass = 1, 2 do
+    local dir = (pass == 1) and 1 or nil
+    if not dir and sameEdge then return direct() end
+    prev = {}
+    local dist, capped = M.dijkstra(g, M.sourcesFor(g, from.e, ft, 0, dir), maxDist, prev, dir)
+    local viaA, viaB = M.endDists(g, dist, to.e, tt, dir)
+    if viaA and (not viaB or viaA <= viaB) then endNode = et.a elseif viaB then endNode = et.b end
+    if endNode or capped then break end -- capped : trop loin, pas une impasse
+  end
+  if not endNode then return nil end
   -- remonte le chemin : nodes[1] = noeud d'arrivée ; le segment entre nodes[k] et nodes[k+1] est used[k]
   local nodes, used = {endNode}, {}
   local n, guard = endNode, 0
@@ -361,17 +424,10 @@ function M.route(g, from, to, maxDist)
   return pts
 end
 
--- Distance routière d'un point attaché (ei, t, off) à partir d'une table dist.
-function M.pointDist(g, dist, ei, t, off)
-  local e = g.edges[ei]
-  if not e then return nil end
-  local da, db = dist[e.a], dist[e.b]
-  local best
-  if da then best = da + t * e.len end
-  if db then
-    local v = db + (1 - t) * e.len
-    if not best or v < best then best = v end
-  end
+-- Distance routière d'un point attaché (ei, t, off) à partir d'une table dist (dir : voir endDists).
+function M.pointDist(g, dist, ei, t, off, dir)
+  local best, viaB = M.endDists(g, dist, ei, t, dir)
+  if viaB and (not best or viaB < best) then best = viaB end
   if best then return best + (off or 0) end
   return nil
 end

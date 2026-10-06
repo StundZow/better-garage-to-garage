@@ -34,6 +34,7 @@
         <span class="ll-pill">{{ state.settings.locMode === 'custom' ? 'Mes points' : (fmtDist(state.settings.minDist) + ' – ' + fmtDist(state.settings.maxDist)) }}</span>
         <span class="ll-pill" ng-if="state.vehicles.loaded">{{ state.vehicles.eligibleModels }} véhicules{{ state.settings.veh.transmission === 'manual' ? ' · manuelle' : (state.settings.veh.transmission === 'auto' ? ' · auto' : '') }}</span>
         <span class="ll-pill">{{ trafficPill() }}</span>
+        <span class="ll-pill ll-pill-lvl" ng-if="state.settings.timeLimit" ng-class="'ll-lvl-' + timeLevelIdxOf(state.settings.timeLevel)">⏱ {{ timeLevelLabel(timeLevelIdxOf(state.settings.timeLevel)) }}</span>
       </div>
     </section>
 
@@ -93,6 +94,15 @@
         </div>
         <div class="ll-progress"><div class="ll-progress-bar" ng-style="{width: ((hud.progress || 0) * 100) + '%'}"></div></div>
 
+        <!-- difficulté du temps : modifiable tant que le chrono n'est pas lancé -->
+        <div class="ll-mtime" ng-if="sess.timeLevelId && hud.chronoState === 'wait'">
+          <div class="ll-slider ll-lvl" ng-class="'ll-lvl-' + ui.mTimeIdx">
+            <div class="ll-slider-head"><span>Difficulté du temps</span><b>{{ timeLevelLabel(ui.mTimeIdx) }}</b></div>
+            <input type="range" min="0" max="5" step="1" ng-model="ui.mTimeIdx" ng-change="missionTimeLevel()">
+          </div>
+          <div class="ll-hint">Modifiable jusqu'à ce que tu démarres.</div>
+        </div>
+
         <div class="ll-stars ll-stars-on" ng-if="hud.stars > 0">
           <svg viewBox="0 0 24 24" ng-repeat="i in [1,2,3,4,5]" ng-class="{'ll-star-on': hud.stars >= i}"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
         </div>
@@ -148,7 +158,7 @@
           <span class="ll-result-chrono" ng-if="sess.summary.pursuitTime >= 1"><svg viewBox="0 0 24 24"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.962 8.962 0 0012 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>{{ fmtTime(sess.summary.pursuitTime) }}</span>
         </div>
         <div class="ll-record" ng-if="sess.summary.record"><svg viewBox="0 0 24 24"><path d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94.63 1.5 1.98 2.63 3.61 2.96V19H7v2h10v-2h-4v-3.1c1.63-.33 2.98-1.46 3.61-2.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z"/></svg>Nouveau record !</div>
-        <div class="ll-note" ng-if="state.settings.autoNext">La livraison suivante démarre automatiquement…</div>
+        <div class="ll-note" ng-if="state.settings.autoNext || (state.settings.instantNext && state.settings.validation === 'handbrake')">La livraison suivante démarre automatiquement…</div>
       </div>
 
       <!-- Véhicule perdu -->
@@ -246,18 +256,7 @@
             <div class="ll-slider-head"><span>Taille de la zone P</span><b>{{ s.zoneScale | number:2 }} × le véhicule</b></div>
             <input type="range" min="1.1" max="2" step="0.05" ng-model="s.zoneScale" ng-change="pushSoon()">
           </div>
-          <div class="ll-row">
-            <div class="ll-row-title">Temps limite</div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.timeLimit" ng-change="push()"><span></span></label>
-          </div>
-          <div ng-if="s.timeLimit">
-            <div class="ll-slider">
-              <div class="ll-slider-head"><span>Difficulté</span><b>{{ timeLevelLabel() }}</b></div>
-              <input type="range" min="0" max="5" step="1" ng-model="ui.timeLevelIdx" ng-change="setTimeLevel()">
-            </div>
-            <div class="ll-hint">Calculé à chaque livraison selon le véhicule (accélération, vitesse, freinage, tenue de route) et le trajet (virages, limitations, terre).</div>
-          </div>
-          <div class="ll-row" ng-class="{'ll-disabled': s.instantNext && s.validation === 'handbrake'}">
+          <div class="ll-row" ng-if="!(s.instantNext && s.validation === 'handbrake')">
             <div class="ll-row-title">Enchaîner automatiquement</div>
             <label class="ll-switch"><input type="checkbox" ng-model="s.autoNext" ng-change="push()"><span></span></label>
           </div>
@@ -273,7 +272,7 @@
             <div class="ll-row-title">Garder mon véhicule au lancement</div>
             <label class="ll-switch"><input type="checkbox" ng-model="s.keepOwnVehicle" ng-change="push()"><span></span></label>
           </div>
-          <div class="ll-slider">
+          <div class="ll-slider" ng-if="s.surface === 'paved'">
             <div class="ll-slider-head"><span>Seuil « bitume »</span><b>{{ s.pavedThreshold | number:2 }}</b></div>
             <input type="range" min="0.3" max="1" step="0.05" ng-model="s.pavedThreshold" ng-change="pushSoon()">
           </div>
@@ -350,8 +349,22 @@
         </details>
       </div>
 
-      <!-- ===== Police ===== -->
+      <!-- ===== Difficulté : temps limite, trafic, police ===== -->
       <div ng-if="ui.tab === 'police'" class="ll-pane">
+        <div class="ll-section">
+          <div class="ll-row ll-row-head">
+            <div class="ll-section-title">Temps limite</div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.timeLimit" ng-change="push()"><span></span></label>
+          </div>
+          <div ng-if="s.timeLimit">
+            <div class="ll-slider ll-lvl" ng-class="'ll-lvl-' + ui.timeLevelIdx">
+              <div class="ll-slider-head"><span>Niveau</span><b>{{ timeLevelLabel() }}</b></div>
+              <input type="range" min="0" max="5" step="1" ng-model="ui.timeLevelIdx" ng-change="setTimeLevel()">
+            </div>
+            <div class="ll-hint">Calculé à chaque livraison selon le véhicule et le trajet (virages, limitations, largeur de la route).</div>
+          </div>
+        </div>
+
         <div class="ll-section">
           <div class="ll-section-title">Trafic</div>
           <div class="ll-seg">
@@ -392,39 +405,41 @@
                 <div class="ll-slider-head"><span>Police / civils</span><b>{{ policeSplit() }}</b></div>
                 <input type="range" min="0.05" max="0.75" step="0.05" ng-model="s.traffic.policeRatio" ng-change="pushSoon()">
               </div>
-              <div class="ll-slider">
-                <div class="ll-slider-head"><span>Sévérité</span><b>{{ strictLabel(s.traffic.strictness) }}</b></div>
-                <input type="range" min="0.1" max="1" step="0.05" ng-model="s.traffic.strictness" ng-change="pushSoon()">
-              </div>
-              <div class="ll-row">
-                <div><div class="ll-row-title">Difficulté progressive</div><div class="ll-hint">Plus d'étoiles = police plus agressive, barrages, renforts.</div></div>
-                <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.progressive" ng-change="push()"><span></span></label>
-              </div>
-              <div class="ll-row">
-                <div class="ll-row-title">Écarter la police près de l'arrivée</div>
-                <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.clearPoliceNearEnd" ng-change="push()"><span></span></label>
-              </div>
-              <div class="ll-row">
-                <div class="ll-row-title">Arrestation = livraison ratée</div>
-                <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.arrestFails" ng-change="push()"><span></span></label>
-              </div>
             </div>
             <div class="ll-row">
               <div class="ll-row-title">Retirer le trafic quand j'arrête</div>
               <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.removeOnStop" ng-change="push()"><span></span></label>
             </div>
           </div>
-          <div class="ll-row">
-            <div><div class="ll-row-title">Poursuites de PNJ</div><div class="ll-hint">La police prend parfois en chasse un PNJ suspect.</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.npcChases" ng-change="push()"><span></span></label>
-          </div>
-          <div class="ll-row">
-            <div class="ll-row-title">Les PNJ ignorent les sirènes</div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.civiliansIgnoreSirens" ng-change="push()"><span></span></label>
-          </div>
-          <div class="ll-row">
-            <div class="ll-row-title">Police sans gyrophares ni sirènes</div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.policeNoSiren" ng-change="push()"><span></span></label>
+          <div ng-if="s.traffic.mode !== 'off' && !(s.traffic.mode === 'on' && s.traffic.police === 'off')">
+            <div class="ll-slider" ng-if="s.traffic.mode === 'on'">
+              <div class="ll-slider-head"><span>Sévérité</span><b>{{ strictLabel(s.traffic.strictness) }}</b></div>
+              <input type="range" min="0.1" max="1" step="0.05" ng-model="s.traffic.strictness" ng-change="pushSoon()">
+            </div>
+            <div class="ll-row">
+              <div><div class="ll-row-title">Difficulté progressive</div><div class="ll-hint">Plus d'étoiles = police plus agressive, barrages, renforts.</div></div>
+              <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.progressive" ng-change="push()"><span></span></label>
+            </div>
+            <div class="ll-row">
+              <div class="ll-row-title">Écarter la police près de l'arrivée</div>
+              <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.clearPoliceNearEnd" ng-change="push()"><span></span></label>
+            </div>
+            <div class="ll-row">
+              <div class="ll-row-title">Arrestation = livraison ratée</div>
+              <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.arrestFails" ng-change="push()"><span></span></label>
+            </div>
+            <div class="ll-row">
+              <div><div class="ll-row-title">Poursuites de PNJ</div><div class="ll-hint">La police prend parfois en chasse un PNJ suspect.</div></div>
+              <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.npcChases" ng-change="push()"><span></span></label>
+            </div>
+            <div class="ll-row">
+              <div class="ll-row-title">Les PNJ ignorent les sirènes</div>
+              <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.civiliansIgnoreSirens" ng-change="push()"><span></span></label>
+            </div>
+            <div class="ll-row">
+              <div class="ll-row-title">Police sans gyrophares ni sirènes</div>
+              <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.policeNoSiren" ng-change="push()"><span></span></label>
+            </div>
           </div>
           <div class="ll-traffic-now">
             <div><b>{{ state.traffic.amount || 0 }}</b><span>en circulation</span></div>

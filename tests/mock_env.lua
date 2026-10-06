@@ -222,6 +222,7 @@ core_vehicles = {
     return v, {v}
   end,
   replaceVehicle = function(model, opts, other)
+    if model == 'broken' then return nil end -- comme le jeu : config illisible, rien n'est remplacé
     other = other or getPlayerVehicle(0)
     local s = SIZES[model] or {2.0, 4.8}
     other.model, other.config, other.w, other.l = model, opts.config, s[1], s[2]
@@ -358,6 +359,11 @@ gameplay_parking = {
 env.pursuitMode = 0
 gameplay_police = {
   setPursuitVars = function(v) env.policeVars = env.policeVars or {}; for k, x in pairs(v or {}) do env.policeVars[k] = x end end,
+  getPursuitVars = function()
+    local d = {strictness = 0.5, suspectFrequency = 0.5, roadblockFrequency = 0.5, evadeTime = 45, evadeRadius = 80, arrestTime = 5}
+    for k, x in pairs(env.policeVars or {}) do d[k] = x end
+    return d
+  end,
   setupPursuitGameplay = function(vid, ids, opts)
     if (env.policeCount or 0) > 0 then env.wantedVeh = vid; env.wantedLevel = opts and opts.pursuitMode; return true end
     return false

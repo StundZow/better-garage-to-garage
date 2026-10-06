@@ -76,6 +76,26 @@ function M.buildRoadSpots(g, opts)
   return out
 end
 
+-- Profondeur d'une allée : longueur de la chaîne privée depuis le fond (noeud i, segment ei) en
+-- passant par les noeuds de degré 2, jusqu'au carrefour, moins la demi-largeur de la rue à ce
+-- carrefour (= distance du fond au trottoir). Au-delà de 60 m, la valeur exacte n'a plus d'intérêt.
+local function driveDepth(g, i, ei)
+  local e = g.edges[ei]
+  local u = (e.a == i) and e.b or e.a
+  local len, prevE = e.len, ei
+  for _ = 1, 200 do
+    if g.deg[u] ~= 2 or len >= 60 then break end
+    local adj = g.adj[u]
+    local nei = (adj[1] == prevE) and adj[2] or adj[1]
+    local ne = g.edges[nei]
+    if not ne.private then break end
+    len = len + ne.len
+    u = (ne.a == u) and ne.b or ne.a
+    prevE = nei
+  end
+  return max(0, len - g.r[u])
+end
+
 -- Culs-de-sac de routes privées = allées de maisons / garages.
 function M.buildDeadEnds(g, opts)
   opts = opts or {}
@@ -94,7 +114,7 @@ function M.buildDeadEnds(g, opts)
             id = 'h' .. i, kind = 'home', deadEnd = true,
             x = g.x[i], y = g.y[i], z = g.z[i],
             fx = fx, fy = fy, fz = fz, ux = g.nx[i], uy = g.ny[i], uz = g.nz[i],
-            half = g.r[i], edgeLen = e.len,
+            half = g.r[i], edgeLen = e.len, depth = driveDepth(g, i, ei),
             e = ei, t = (e.a == i) and 0 or 1, off = 0, drv = e.drv,
             comp = g.comp[i],
           }
@@ -165,7 +185,8 @@ function M.fits(c, vehW, vehL, scale)
   if c.kind == 'road' then
     return c.half * 2 >= zw * 0.95
   elseif c.deadEnd then
-    return c.half * 2 >= zw * 0.75
+    -- assez large, et assez profonde pour que la zone ne déborde pas sur la rue
+    return c.half * 2 >= zw * 0.75 and (c.depth or c.edgeLen or 0) >= vehL * scale
   elseif c.kind == 'custom' then
     return true
   end
@@ -189,7 +210,13 @@ function M.zoneFor(c, vehW, vehL, scale, legalSide, dirSign, force)
     local off = max(0, c.half - zw * 0.5 - 0.15) * (legalSide or 1)
     x, y, z = x + rx * off, y + ry * off, z + rz * off
   elseif c.deadEnd then
-    local shift = min(zl * 0.5 + 0.5, (c.edgeLen or zl) * 0.85)
+    -- recule la zone dans l'allée : l'avant près du fond, l'arrière avant le trottoir
+    local shift = zl * 0.5 + 0.5
+    if c.depth and c.depth >= zl then
+      shift = min(shift, c.depth - zl * 0.5)
+    else
+      shift = min(shift, (c.edgeLen or zl) * 0.85) -- allée trop courte (zone forcée)
+    end
     x, y, z = x - fx * shift, y - fy * shift, z - fz * shift
   end
   local rx, ry, rz = norm3(cross(fx, fy, fz, ux, uy, uz))
@@ -235,13 +262,17 @@ local function removeItem(list, item)
 end
 
 -- Distance (routière si possible) depuis la table dist ; sinon distance à vol d'oiseau majorée.
-local function candDist(g, dist, c, from)
+-- dir = 1 : dist calculée dans le sens de circulation depuis from (nil : sens uniques ignorés).
+local function candDist(g, dist, c, from, dir)
   if g and dist and c.e then
-    local d = graph.pointDist(g, dist, c.e, c.t, c.off)
-    if d and from and from.e == c.e then
-      -- même segment : trajet direct le long de la route
-      local direct = abs((c.t or 0) - (from.t or 0)) * g.edges[c.e].len + (from.off or 0) + (c.off or 0)
-      if direct < d then d = direct end
+    local d = graph.pointDist(g, dist, c.e, c.t, c.off, dir)
+    if from and from.e == c.e then
+      -- même segment : trajet direct le long de la route (sauf à contresens d'un sens unique)
+      local direct = graph.alongEdge(g, c.e, from.t or 0, c.t or 0, dir)
+      if direct then
+        direct = direct + (from.off or 0) + (c.off or 0)
+        if not d or direct < d then d = direct end
+      end
     end
     if d then return d end
   end
@@ -252,16 +283,37 @@ local function candDist(g, dist, c, from)
   return nil
 end
 
-local function sourcesOf(g, p)
-  if g and p.e then return graph.sourcesFor(g, p.e, p.t or 0, p.off or 0) end
+local function sourcesOf(g, p, dir)
+  if g and p.e then return graph.sourcesFor(g, p.e, p.t or 0, p.off or 0, dir) end
   return nil
 end
 
+local function countKeys(t)
+  local n = 0
+  for _ in pairs(t) do n = n + 1 end
+  return n
+end
+
 -- Choisit une destination depuis un point de départ (p : candidat ou {x,y,z,e,t,off}).
-local function chooseDest(ctx, pool, p, maxSearch)
+-- dir = 1 : distances dans le sens de circulation (celles du GPS) ; nil : sens uniques ignorés.
+-- Renvoie inRange, others, trapped (départ coincé : ce qui est hors d'atteinte dans le bon sens est
+-- mesuré sans les sens uniques).
+local function chooseDest(ctx, pool, p, maxSearch, dir)
   local g = ctx.g
-  local sources = sourcesOf(g, p)
-  local dist = sources and graph.dijkstra(g, sources, maxSearch) or nil
+  local sources = sourcesOf(g, p, dir)
+  local dist, capped, distU
+  if sources then dist, capped = graph.dijkstra(g, sources, maxSearch, nil, dir) end
+  if dir and dist and not capped then
+    -- tout ce qu'on peut atteindre dans le bon sens a été vu : si c'est bien moins que sans les sens
+    -- uniques, le départ est coincé par des sens uniques sans issue (données de la map). Le GPS en
+    -- sortira à contresens : le reste est alors mesuré sans les sens uniques.
+    local reach = countKeys(dist)
+    local comp = g.comp and g.comp[g.edges[p.e].a]
+    if not (comp and g.compNodes and reach * 2 >= g.compNodes[comp]) then -- sinon : pas coincé, inutile de vérifier
+      distU = graph.dijkstra(g, sourcesOf(g, p), maxSearch)
+      if reach * 2 >= countKeys(distU) then distU = nil end
+    end
+  end
   local inRange, others = {}, {}
   local minD, maxD = ctx.minD, ctx.maxD
   local minSep2 = (ctx.minSeparation or 40) ^ 2
@@ -269,18 +321,19 @@ local function chooseDest(ctx, pool, p, maxSearch)
     if c ~= p and not (ctx.exclude and ctx.exclude[c.id]) then
       local dx, dy = c.x - p.x, c.y - p.y
       if dx * dx + dy * dy >= minSep2 then
-        local d = candDist(g, dist, c, p)
+        local d, wrong = candDist(g, dist, c, p, dir), nil
+        if not d and distU then d, wrong = candDist(g, distU, c, p), true end
         if d then
           if d >= minD and d <= maxD then
-            inRange[#inRange + 1] = {c = c, d = d}
+            inRange[#inRange + 1] = {c = c, d = d, wrong = wrong}
           else
-            others[#others + 1] = {c = c, d = d}
+            others[#others + 1] = {c = c, d = d, wrong = wrong}
           end
         end
       end
     end
   end
-  return inRange, others
+  return inRange, others, distU ~= nil
 end
 
 local function finalizeDest(ctx, list)
@@ -304,15 +357,34 @@ end
 function M.orientPickup(g, pickup, pZone, dest, ctx, maxSearch)
   if not g or not pickup or not pZone or not dest or not pickup.e or not dest.e then return pZone end
   if pickup.kind == 'road' and pickup.oneWay then return pZone end
-  local fromDest = graph.dijkstra(g, graph.sourcesFor(g, dest.e, dest.t or 0, dest.off or 0), maxSearch)
   local e = g.edges[pickup.e]
-  local da, db = fromDest[e.a], fromDest[e.b]
-  if not da and not db then return pZone end
-  local viaA = da and (pickup.t * e.len + da) or math.huge
-  local viaB = db and ((1 - pickup.t) * e.len + db) or math.huge
+  local pt, dt = pickup.t or 0, dest.t or 0
+  -- trajet restant en partant vers a / vers b : recherche à rebours depuis la destination, dans le
+  -- sens de circulation ; sans les sens uniques si rien n'est relié ainsi (données de la map)
+  local viaA, viaB, da, db
+  for pass = 1, 2 do
+    local dir = (pass == 1) and -1 or nil
+    local fromDest = graph.dijkstra(g, graph.sourcesFor(g, dest.e, dt, dest.off or 0, dir), maxSearch, nil, dir)
+    da, db = fromDest[e.a], fromDest[e.b]
+    viaA, viaB = graph.endDists(g, fromDest, pickup.e, pt, dir)
+    if pickup.e == dest.e then
+      -- même segment : tout droit vers la destination si c'est permis
+      local direct = graph.alongEdge(g, pickup.e, pt, dt, dir)
+      if direct then
+        direct = direct + (dest.off or 0)
+        if dt < pt then viaA = min(viaA or direct, direct) else viaB = min(viaB or direct, direct) end
+      end
+    end
+    if viaA or viaB then break end
+  end
+  if not viaA and not viaB then return pZone end
+  viaA, viaB = viaA or math.huge, viaB or math.huge
   local ax, ay, bx, by = g.x[e.a], g.y[e.a], g.x[e.b], g.y[e.b]
   local dirx, diry = bx - ax, by - ay
-  if viaA < viaB then dirx, diry = -dirx, -diry end
+  -- égalité (fond d'allée : passer par a ou b revient au même) : vers le noeud le plus proche de l'arrivée
+  if viaA < viaB - 1e-6 or (abs(viaA - viaB) <= 1e-6 and (da or math.huge) < (db or math.huge)) then
+    dirx, diry = -dirx, -diry
+  end
   local l = sqrt(dirx * dirx + diry * diry)
   if l < 1e-6 then return pZone end
   dirx, diry = dirx / l, diry / l
@@ -325,7 +397,7 @@ function M.orientPickup(g, pickup, pZone, dest, ctx, maxSearch)
     return z
   end
   -- point de la route où commence le trajet, un peu dans le sens du GPS
-  local px, py = ax + (bx - ax) * pickup.t + dirx * 15, ay + (by - ay) * pickup.t + diry * 15
+  local px, py = ax + (bx - ax) * pt + dirx * 15, ay + (by - ay) * pt + diry * 15
   local tx, ty = px - pZone.x, py - pZone.y
   if pZone.fx * tx + pZone.fy * ty < 0 then
     local z = {}
@@ -357,6 +429,19 @@ local function closestToRange(ctx, others)
   return out
 end
 
+-- Aucune destination à la bonne distance : la plus proche de la fourchette demandée, dans le sens de
+-- circulation, sinon sans les sens uniques (données de la map incohérentes).
+local function relaxedDest(ctx, pool, p, searchMax)
+  local wideMax = max(searchMax * 3, 5000)
+  local _, wide = chooseDest(ctx, pool, p, wideMax, 1)
+  local item, zone = finalizeDest(ctx, closestToRange(ctx, wide))
+  if not item then
+    _, wide = chooseDest(ctx, pool, p, wideMax)
+    item, zone = finalizeDest(ctx, closestToRange(ctx, wide))
+  end
+  return item, zone
+end
+
 --[[
 ctx = {
   g, cands, filter = {kinds, paved, pavedThreshold, avoidHighways},
@@ -386,15 +471,25 @@ function M.pickMission(ctx)
 
   local searchMax = ctx.maxD * 1.05 + 50
 
+  -- départ coincé : d'abord une destination atteignable dans le bon sens, s'il y en a
+  local function finalizeLegalFirst(list)
+    local legal = {}
+    for _, it in ipairs(list) do if not it.wrong then legal[#legal + 1] = it end end
+    if #legal > 0 and #legal < #list then
+      local item, zone = finalizeDest(ctx, legal)
+      if item then return item, zone end
+    end
+    return finalizeDest(ctx, list)
+  end
+
   -- Départ fixe (position actuelle du joueur)
   if ctx.from then
-    local inRange, others = chooseDest(ctx, pool, ctx.from, searchMax)
-    local item, zone = finalizeDest(ctx, inRange)
+    local inRange = chooseDest(ctx, pool, ctx.from, searchMax, 1)
+    local item, zone = finalizeLegalFirst(inRange)
     local relaxed = false
     if not item then
       relaxed = true
-      local _, wide = chooseDest(ctx, pool, ctx.from, max(searchMax * 3, 5000))
-      item, zone = finalizeDest(ctx, closestToRange(ctx, wide))
+      item, zone = relaxedDest(ctx, pool, ctx.from, searchMax)
     end
     if not item then return nil, 'no_destination' end
     return {dest = item.c, destZone = zone, dist = item.d, relaxed = relaxed}
@@ -413,7 +508,12 @@ function M.pickMission(ctx)
     if #pickPool == 0 then pickPool = pool end
   end
 
-  local lastPickup, lastPickupZone, lastOthers
+  local function mission(pickup, pZone, item, zone, relaxed)
+    pZone = M.orientPickup(g, pickup, pZone, item.c, ctx, item.d * 1.5 + 500)
+    return {pickup = pickup, pickupZone = pZone, dest = item.c, destZone = zone, dist = item.d, relaxed = relaxed}
+  end
+
+  local lastPickup, lastPickupZone, trapped
   for _ = 1, (ctx.maxTries or 12) do
     local wrapped = {}
     for i, c in ipairs(pickPool) do wrapped[i] = {c = c} end
@@ -422,23 +522,27 @@ function M.pickMission(ctx)
     local pickup = pItem.c
     local pZone = M.zoneFor(pickup, ctx.vehW, ctx.vehL, ctx.scale, ctx.legalSide, (ctx.rng(2) == 1) and 1 or -1)
     if pZone and (not ctx.isFree or ctx.isFree(pZone, pickup)) then
-      local inRange, others = chooseDest(ctx, pool, pickup, searchMax)
-      local item, zone = finalizeDest(ctx, inRange)
-      if item then
-        pZone = M.orientPickup(g, pickup, pZone, item.c, ctx, item.d * 1.5 + 500)
-        return {pickup = pickup, pickupZone = pZone, dest = item.c, destZone = zone, dist = item.d, relaxed = false}
+      local inRange, _, isTrapped = chooseDest(ctx, pool, pickup, searchMax, 1)
+      if isTrapped then
+        -- départ coincé par des sens uniques sans issue (le GPS partirait à contresens) : on en
+        -- essaie un autre, celui-ci reste en dernier recours
+        trapped = trapped or {pickup = pickup, zone = pZone, inRange = inRange}
+      else
+        local item, zone = finalizeDest(ctx, inRange)
+        if item then return mission(pickup, pZone, item, zone, false) end
+        lastPickup, lastPickupZone = pickup, pZone
       end
-      lastPickup, lastPickupZone, lastOthers = pickup, pZone, others
     end
   end
 
+  if trapped then
+    local item, zone = finalizeLegalFirst(trapped.inRange)
+    if item then return mission(trapped.pickup, trapped.zone, item, zone, false) end
+    if not lastPickup then lastPickup, lastPickupZone = trapped.pickup, trapped.zone end
+  end
   if lastPickup then
-    local _, wide = chooseDest(ctx, pool, lastPickup, max(searchMax * 3, 5000))
-    local item, zone = finalizeDest(ctx, closestToRange(ctx, wide))
-    if item then
-      local pZone = M.orientPickup(g, lastPickup, lastPickupZone, item.c, ctx, item.d * 1.5 + 500)
-      return {pickup = lastPickup, pickupZone = pZone, dest = item.c, destZone = zone, dist = item.d, relaxed = true}
-    end
+    local item, zone = relaxedDest(ctx, pool, lastPickup, searchMax)
+    if item then return mission(lastPickup, lastPickupZone, item, zone, true) end
   end
   return nil, 'no_destination'
 end

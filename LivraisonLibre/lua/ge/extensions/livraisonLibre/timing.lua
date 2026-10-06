@@ -1,6 +1,6 @@
 -- Livraison Libre - temps limite selon la difficulté
 -- Estime le temps qu'il faut pour faire le trajet avec un véhicule donné, à partir de ses performances
--- (0-100 km/h, vitesse max, freinage, hauteur) et du trajet (virages, limitations, terre), pour un
+-- (0-100 km/h, vitesse max, freinage, hauteur) et du trajet (virages, limitations, largeur, terre), pour un
 -- conducteur allant du débutant (très facile) au pilote (impossible). Simulation d'un profil de vitesse :
 -- vitesse max autorisée par les virages et la route, puis accélération et freinage réalistes.
 -- Module "pur" (nombres uniquement), testable hors du jeu.
@@ -11,18 +11,21 @@ local sqrt, min, max, abs, atan2, log, pi, huge = math.sqrt, math.min, math.max,
 local G = 9.81
 local STEP = 5          -- m : pas de la simulation
 local WINDOW = 2        -- pas de part et d'autre pour mesurer la courbure (±10 m)
+local ROAD_WIDTH = 8    -- m : largeur d'une route normale à double sens (référence)
 
--- limit : facteur sur la limitation de vitesse (nil = aucune limite, seulement le véhicule)
+-- limit : facteur sur la limitation de vitesse
+-- wgain : effet de la largeur de la route sur ce facteur (route large : plus vite, route étroite : moins vite)
+-- free : part de « je roule à la vitesse que la route permet » plutôt qu'à la limitation (0 à 1)
 -- grip / accel / brake : part de l'adhérence, de l'accélération et du freinage du véhicule utilisée
--- line : trajectoire (1 = reste dans sa voie ; plus = coupe les virages, rayon plus grand)
+-- line : trajectoire (1 = reste au milieu de sa voie ; plus = utilise la largeur, coupe les virages)
 -- margin : marge sur le temps simulé
 M.LEVELS = {
-  {id = 'tres_facile', label = 'Très facile', limit = 0.9, grip = 0.40, accel = 0.45, brake = 0.40, line = 1.0,  margin = 1.45},
-  {id = 'facile',      label = 'Facile',      limit = 1.0, grip = 0.50, accel = 0.55, brake = 0.50, line = 1.0,  margin = 1.25},
-  {id = 'moyen',       label = 'Moyen',       limit = 1.2, grip = 0.65, accel = 0.75, brake = 0.65, line = 1.15, margin = 1.12},
-  {id = 'dur',         label = 'Dur',         limit = 1.5, grip = 0.80, accel = 0.90, brake = 0.80, line = 1.35, margin = 1.05},
-  {id = 'tres_dur',    label = 'Très dur',    limit = 1.9, grip = 0.92, accel = 1.0,  brake = 0.92, line = 1.6,  margin = 1.0},
-  {id = 'impossible',  label = 'Impossible',  limit = nil, grip = 1.05, accel = 1.0,  brake = 1.0,  line = 2.0,  margin = 0.95},
+  {id = 'tres_facile', label = 'Très facile',    limit = 0.9, wgain = 0.06, free = 0,    grip = 0.40, accel = 0.45, brake = 0.40, line = 1.05, margin = 1.45},
+  {id = 'facile',      label = 'Facile',         limit = 1.0, wgain = 0.08, free = 0,    grip = 0.50, accel = 0.55, brake = 0.50, line = 1.08, margin = 1.25},
+  {id = 'moyen',       label = 'Moyen',          limit = 1.2, wgain = 0.17, free = 0.05, grip = 0.65, accel = 0.75, brake = 0.65, line = 1.15, margin = 1.12},
+  {id = 'dur',         label = 'Difficile',      limit = 1.5, wgain = 0.33, free = 0.15, grip = 0.80, accel = 0.90, brake = 0.80, line = 1.35, margin = 1.05},
+  {id = 'tres_dur',    label = 'Très difficile', limit = 1.9, wgain = 0.47, free = 0.35, grip = 0.92, accel = 1.0,  brake = 0.92, line = 1.6,  margin = 1.0},
+  {id = 'impossible',  label = 'Impossible',     limit = 2.0, wgain = 0.5,  free = 1,    grip = 1.05, accel = 1.0,  brake = 1.0,  line = 2.0,  margin = 0.95},
 }
 M.byId = {}
 for i, l in ipairs(M.LEVELS) do l.index = i; M.byId[l.id] = l end
@@ -87,7 +90,7 @@ local function resample(points, trimEnd)
     while si < #segs and segs[si].s0 + segs[si].len < s do si = si + 1 end
     local sg = segs[si]
     k = k + 1
-    samples[k] = {heading = sg.heading, speed = sg.a.speed, drv = sg.a.drv}
+    samples[k] = {heading = sg.heading, speed = sg.a.speed, drv = sg.a.drv, width = sg.a.r and sg.a.r * 2 or nil}
     s = s + STEP
   end
   return samples, length
@@ -120,10 +123,18 @@ function M.estimate(points, veh, level, opts)
     local drv = clamp(tonumber(smp[k].drv) or 1, 0, 1)
     local grip = L.grip * (0.55 + 0.45 * drv) -- terre / route dégradée : moins d'adhérence
     smp[k].grip = grip
-    local vc = curv > 1e-4 and sqrt(veh.aLat * grip * (L.line or 1) / curv) or huge
+    -- largeur de la route : couper un virage demande de la place (rayon gagné selon la largeur),
+    -- et une route large permet de rouler plus vite qu'une petite route étroite
+    local w = clamp(tonumber(smp[k].width) or ROAD_WIDTH, 2.5, 30)
+    local line = 1 + ((L.line or 1) - 1) * clamp(w / ROAD_WIDTH, 0.4, 1.6)
+    local vc = curv > 1e-4 and sqrt(veh.aLat * grip * line / curv) or huge
     local limit = tonumber(smp[k].speed)
     if not limit or limit <= 0 or limit > 80 then limit = 22.2 end
-    local vl = L.limit and limit * L.limit or huge
+    -- vitesse visée par rapport à la limitation : plus haute sur une route large, plus basse sur une petite route
+    local vTarget = limit * L.limit * (1 + L.wgain * (clamp(w / ROAD_WIDTH, 0.5, 1.5) - 1))
+    -- vitesse que la route permet sans tenir compte de la limitation (jamais moins que la vitesse visée)
+    local vFree = max(22 + 5 * w, vTarget)
+    local vl = (1 - L.free) * vTarget + L.free * vFree
     vmax[k] = min(veh.vt * 0.98, vc, vl)
   end
   local v = {0}
@@ -148,6 +159,13 @@ end
 local FALLBACK_SPEED = {tres_facile = 9, facile = 11, moyen = 13.5, dur = 16, tres_dur = 19, impossible = 23}
 function M.fallback(dist, level)
   return (tonumber(dist) or 0) / (FALLBACK_SPEED[level] or FALLBACK_SPEED.moyen)
+end
+
+-- Bouts hors route (sortir d'un parking, rejoindre la route depuis un point à l'écart) : deux fois moins vite
+function M.access(dist, level)
+  dist = tonumber(dist)
+  if not dist or dist ~= dist or dist <= 0 then return 0 end
+  return min(dist, 2000) / ((FALLBACK_SPEED[level] or FALLBACK_SPEED.moyen) * 0.5)
 end
 
 return M

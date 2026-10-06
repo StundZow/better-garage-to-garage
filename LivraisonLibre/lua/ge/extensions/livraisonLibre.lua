@@ -13,7 +13,7 @@ local trafficCtl = require('/lua/ge/extensions/livraisonLibre/trafficCtl')
 local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 local timing = require('/lua/ge/extensions/livraisonLibre/timing')
 
-local VERSION = '1.6.0'
+local VERSION = '1.7.0'
 local DATA_DIR = '/settings/livraisonLibre/'
 local SETTINGS_FILE = DATA_DIR .. 'settings.json'
 local STATS_FILE = DATA_DIR .. 'stats.json'
@@ -835,6 +835,7 @@ local function sessionInfo()
     routeDist = S.routeDist,
     timeLimit = S.timeLimit,
     timeLevel = S.timeLevel and timing.byId[S.timeLevel] and timing.byId[S.timeLevel].label or nil,
+    timeLevelId = S.timeLevel,
     police = S.policeCtl and {mode = S.policeMode, level = settings.traffic.wantedLevel} or nil,
     summary = S.summary,
     message = S.message,
@@ -964,6 +965,8 @@ local function recordMission(result, reason)
   elseif ts.police > 0 then
     police = 'Patrouilles'
   end
+  -- police réglée depuis le panneau pendant la livraison
+  if S.policeCtl and POLICE_LABEL[S.policeMode] then police = POLICE_LABEL[S.policeMode] end
   journalSeq = journalSeq + 1
   local fromName = S.pickup and readable(S.pickup.label or KIND_LABEL[S.pickup.kind]) or 'Ma position'
   local toName = S.dest and readable(S.dest.label or KIND_LABEL[S.dest.kind]) or '?'
@@ -1009,6 +1012,7 @@ end
 -- déroulement des missions
 ---------------------------------------------------------------------------
 local prepareNext
+local adaptZoneToVehicle
 
 local function newSession()
   return {
@@ -1102,9 +1106,8 @@ end
 local function stopSession(silent)
   if S then
     flushSummary() -- pas de chargement à venir : on peut afficher le résumé en attente
-    if S.phase == 'driving' or S.phase == 'lost' then
-      if recordMission('Arrêtée') then saveStats() end
-    end
+    -- livraison en cours (même pendant un changement de véhicule) : notée « Arrêtée » au journal
+    if recordMission('Arrêtée') then saveStats() end
     trafficCtl.resetPursuit(S.vehId)
     trafficCtl.clearSirenPatches()
     trafficCtl.resetTuning()
@@ -1191,8 +1194,8 @@ local function placeZone(dirSign)
 end
 
 -- Temps limite de la livraison : simulation du trajet avec ce véhicule, au niveau de difficulté choisi
-local function computeTimeLimit(plan)
-  local level = settings.timeLevel
+local function computeTimeLimit(plan, level)
+  level = level or settings.timeLevel
   local from = plan.pickup or plan.from
   local est
   if levelData and from and from.e and plan.dest and plan.dest.e then
@@ -1200,11 +1203,22 @@ local function computeTimeLimit(plan)
     if okR and pts then
       local info = S.info or {}
       local okE, t = pcall(timing.estimate, pts, timing.vehicleModel(info.perf, info.mainCat), level)
-      if okE and t then est = t end
+      if okE and t then
+        -- bouts hors route (parking, départ à l'écart de la route) : roulés lentement
+        est = t + timing.access((tonumber(from.off) or 0) + (tonumber(plan.dest.off) or 0), level)
+      end
     end
   end
   if not est then est = timing.fallback(S.routeDist, level) end
   return max(20, est)
+end
+
+-- Avant la 1re accélération, le temps suit le véhicule et la destination actuels
+-- (changement de véhicule, zone déplacée pour un gabarit plus grand)
+local function refreshTimeLimit()
+  if not (S and S.timeLimit and S.timePlan and S.timeLevel) or (S.m and S.m.moveAt) then return end
+  if S.dest then S.timePlan.dest = S.dest end
+  S.timeLimit = computeTimeLimit(S.timePlan, S.timeLevel)
 end
 
 local function beginDriving()
@@ -1215,25 +1229,37 @@ local function beginDriving()
   S.dest, S.pickup = plan.dest, plan.pickup
   placeZone(plan.destZone and plan.destZone.dirSign or 1)
   S.routeDist = max(plan.dist or 0, 50)
-  S.relaxed = plan.relaxed or plan.kindsRelaxed
+  S.relaxed, S.kindsRelaxed = plan.relaxed, plan.kindsRelaxed
   S.validateTimer, S.validate, S.inZone, S.parkBrake = 0, 0, false, 0
   local quiet = false
   if S.keepTimer then
     -- simple changement de véhicule : on garde le chrono et les mesures de la mission
     S.elapsed, S.timeLimit = S.keepTimer.elapsed or 0, S.keepTimer.limit
     S.keepTimer = nil
+    refreshTimeLimit()
+    -- recherché : le nouveau véhicule l'est aussi (le jeu remet à zéro le rôle du véhicule remplacé)
+    if S.rearmWanted then S.wanted = {timer = 2, tries = 0} end
+    S.rearmWanted = nil
     quiet = true
   else
     S.elapsed = 0
+    -- trajet gardé : la difficulté peut encore changer tant que le chrono n'est pas lancé
+    S.timePlan = {pickup = plan.pickup, from = plan.from, dest = plan.dest}
     S.timeLimit = settings.timeLimit and computeTimeLimit(plan) or nil
     S.timeLevel = settings.timeLimit and settings.timeLevel or nil
     S.m = newMetrics()
     S.recorded = false
     trafficCtl.resetTuning()
-    S.wanted = nil
-    if S.policeMode == 'wanted' then
+    S.wanted, S.wasWanted = nil, nil
+    -- (une poursuite déjà en cours, après « Nouvelle destination », continue telle quelle)
+    if S.policeMode == 'wanted' and trafficCtl.pursuitMode(S.vehId) == 0 then
       S.wanted = {timer = 2.5, tries = 0}
     end
+  end
+  -- véhicule qui ne rentre pas sur la place (autre véhicule, véhicule de secours après un spawn raté) :
+  -- la livraison passe à la place compatible la plus proche, comme pour un changement de véhicule à la main
+  if S.dest and S.dest.kind ~= 'custom' and not locLib.fits(S.dest, S.vehW, S.vehL, settings.zoneScale) and adaptZoneToVehicle() then
+    refreshTimeLimit()
   end
   -- réglage de la police depuis le panneau pendant la livraison (s'il y a des voitures de police)
   if not S.policeCtl then
@@ -1258,7 +1284,13 @@ local function beginDriving()
   if next(ffbHeld) then S.ffbRelease = FFB_RELEASE_DELAY end
   if S.pendingSummary then S.summaryDelay = SUMMARY_DELAY end
   S.message = nil
-  if S.relaxed then S.message = 'Distance demandée introuvable : destination la plus proche choisie.' end
+  if S.relaxed and S.kindsRelaxed then
+    S.message = 'Aucun lieu du type choisi à cette distance : destination la plus proche, autre type de lieu.'
+  elseif S.relaxed then
+    S.message = 'Distance demandée introuvable : destination la plus proche choisie.'
+  elseif S.kindsRelaxed then
+    S.message = 'Aucun lieu du type choisi : un autre type de lieu est utilisé.'
+  end
   if not quiet then
     ui_message(string.format('Livraison n°%d : %s → %s', S.count + 1, fmtDist(S.routeDist), readable(candInfo(S.dest).label)), 6, 'livraisonLibre', 'info')
   end
@@ -1395,7 +1427,10 @@ local function deliver()
   local dist = S.routeDist or 0
   local avg = perfAvgKmh()
   local records = {}
-  if dist >= 500 and avg > (stats.bestAvg or 0) then stats.bestAvg = avg; records.avg = true end
+  if dist >= 500 and avg > (stats.bestAvg or 0) then
+    if (stats.bestAvg or 0) > 0 then records.avg = true end -- pas de « record » à la toute première livraison
+    stats.bestAvg = avg
+  end
   if dist >= 500 and (not stats.fastest or time < stats.fastest.time) then
     if stats.fastest then records.fastest = true end
     stats.fastest = {time = time, dist = dist, vehicle = S.info and S.info.name or '?'}
@@ -1468,7 +1503,7 @@ end
 
 -- Adapte la zone au gabarit du véhicule ; si l'emplacement est trop petit (camion sur une place
 -- de parking, route trop étroite...), la livraison passe à l'emplacement compatible le plus proche.
-local function adaptZoneToVehicle()
+adaptZoneToVehicle = function()
   local moved = false
   local ld = levelData
   if S.dest and ld and S.dest.kind ~= 'custom' and not locLib.fits(S.dest, S.vehW, S.vehL, settings.zoneScale) then
@@ -1492,18 +1527,30 @@ local function adaptZoneToVehicle()
   return moved
 end
 
+-- recherché en ce moment (en attente, suspect ou poursuivi) : à garder si le véhicule change
+local function stillWanted()
+  return S.policeMode == 'wanted' and (S.wanted ~= nil or S.wasWanted or trafficCtl.isWanted(S.vehId)) or false
+end
+
 local function adoptVehicle(id)
   local veh = getObjectByID(id)
   if not veh then return end
   local info = infoFromVehicle(veh)
   if not info then return end
   local sameObject = (id == S.vehId)
+  -- le jeu remet à zéro le rôle d'un véhicule qui réapparaît : recherché à nouveau s'il l'était
+  local rearm = stillWanted()
   if sameObject and S.info and S.info.model == info.model then
-    if S.info.config == info.config then return end
+    if S.info.config == info.config then
+      if rearm then S.wanted = S.wanted or {timer = 2, tries = 0} end
+      return
+    end
     if not configKeyOf(veh) then
       -- simple modification des pièces : même véhicule, on adapte juste la zone
       S.vehW, S.vehL = vehicleSize(veh, S.info)
       adaptZoneToVehicle()
+      refreshTimeLimit()
+      if rearm then S.wanted = S.wanted or {timer = 2, tries = 0} end
       sendState()
       return
     end
@@ -1520,6 +1567,8 @@ local function adoptVehicle(id)
     S.message = nil
   end
   local moved = adaptZoneToVehicle()
+  refreshTimeLimit()
+  if rearm then S.wanted = {timer = 2, tries = 0} end -- toujours recherché dans le nouveau véhicule
   toast('info', 'Véhicule de livraison : ' .. tostring(info.name) .. (moved and ' (zone déplacée pour ce gabarit)' or ''))
   sendState()
 end
@@ -1627,6 +1676,13 @@ end
 
 local function updateDriving(dtReal, dtSim)
   local veh = S.vehId and getObjectByID(S.vehId)
+  if veh then
+    S.wantedCheck = (S.wantedCheck or 0) - dtReal
+    if S.wantedCheck <= 0 then
+      S.wantedCheck = 1
+      S.wasWanted = S.policeMode == 'wanted' and (S.wanted ~= nil or trafficCtl.isWanted(S.vehId)) or nil
+    end
+  end
   if not veh then
     S.phase = 'lost'
     S.message = 'Véhicule de livraison perdu. Monte dans un autre véhicule, ou choisis « Autre véhicule » / « Passer ».'
@@ -1653,7 +1709,7 @@ local function updateDriving(dtReal, dtSim)
     S.policeClearTimer = (S.policeClearTimer or 0) - dtReal
     if S.policeClearTimer <= 0 then
       S.policeClearTimer = 1
-      S.wanted = nil -- pas de nouvelle recherche une fois près de l'arrivée
+      S.wanted, S.wasWanted = nil, nil -- pas de nouvelle recherche une fois près de l'arrivée
       trafficCtl.clearPoliceNear(vid, zone, POLICE_CLEAR_DIST * 3)
     end
   end
@@ -1768,7 +1824,8 @@ local function onUpdate(dtReal, dtSim, dtRaw)
   elseif S.phase == 'summary' or S.phase == 'failed' then
     S.phaseTimer = S.phaseTimer + dtReal
     local wait = (S.phase == 'summary') and 3.5 or 4.5
-    if settings.autoNext and S.phaseTimer >= wait then prepareNext({}) end
+    local chain = settings.autoNext or (settings.instantNext and settings.validation ~= 'auto')
+    if chain and S.phaseTimer >= wait then prepareNext({}) end
   end
 
   if S then
@@ -1842,6 +1899,7 @@ local function onClientPostStartMission()
   analysis, startPending = nil, false
   analysisErrors = 0
   if S then stopSession(true) end
+  trafficCtl.forget()
   sendState()
 end
 
@@ -1849,10 +1907,19 @@ local function onClientEndMission()
   levelData = nil
   analysis, startPending = nil, false
   if S then stopSession() end
+  trafficCtl.forget()
 end
 
 local function onNavgraphReloaded()
-  if not S then levelData = nil; analysis = nil end
+  if S then return end
+  levelData = nil
+  -- analyse en cours : relancée sur le nouveau navgraph, sans perdre un lancement en attente
+  local a = analysis
+  analysis = nil
+  if a and a.waiters then
+    for _, cb in ipairs(a.waiters) do analyzeLevel(cb) end
+  end
+  sendState()
 end
 
 local function onExtensionLoaded()
@@ -1863,6 +1930,12 @@ end
 
 local function onExtensionUnloaded()
   if S and S.faded then endFade() end
+  if S then
+    trafficCtl.resetPursuit(S.vehId)
+    trafficCtl.clearSirenPatches()
+    trafficCtl.resetTuning()
+    trafficCtl.restorePolice()
+  end
   releaseAllFFB()
   setPoiHidden(false)
   clearVisuals()
@@ -1942,14 +2015,29 @@ function M.setMissionPolice(mode, level)
   saveSettings()
   if S then
     S.policeMode = mode
-    S.wanted = nil
+    S.wanted, S.wasWanted = nil, nil
+    -- sévérité choisie seulement pour la police du mod (avec le trafic du jeu, la sienne est gardée)
+    local strict = settings.traffic.mode == 'on' and settings.traffic.strictness or nil
     if S.vehId and S.phase == 'driving' then
-      if not trafficCtl.setPoliceMode(S.vehId, mode, level, settings.traffic.strictness) and mode == 'wanted' then
+      if not trafficCtl.setPoliceMode(S.vehId, mode, level, strict) and mode == 'wanted' then
         S.wanted = {timer = 2, tries = 0} -- pas encore de police à portée : on réessaie
       end
     elseif mode == 'off' then
-      trafficCtl.setPoliceMode(S.vehId, 'off', level, settings.traffic.strictness)
+      trafficCtl.setPoliceMode(S.vehId, 'off', level, strict)
     end
+  end
+  sendState()
+end
+
+-- Difficulté du temps choisie depuis le panneau : appliquée à la livraison en cours tant que le chrono
+-- n'est pas lancé (avant la 1re accélération), et gardée pour les suivantes
+function M.setMissionTimeLevel(level)
+  if not timing.byId[level] then return end
+  settings.timeLevel = level
+  saveSettings()
+  if S and S.phase == 'driving' and S.timeLimit and S.timePlan and not (S.m and S.m.moveAt) then
+    S.timeLevel = level
+    refreshTimeLimit()
   end
   sendState()
 end
@@ -2061,12 +2149,19 @@ end
 -- Remplace le véhicule sur place (même destination, même chrono)
 function M.rerollVehicle()
   if not S or (S.phase ~= 'driving' and S.phase ~= 'lost') or not S.dest then return end
-  local info, err = pickVehicleInfo()
+  -- de préférence un véhicule qui rentre sur la place de livraison
+  local info, err
+  for _ = 1, 8 do
+    local cand, e = pickVehicleInfo()
+    if not cand then err = e break end
+    info = cand
+    if S.dest.kind == 'custom' or locLib.fits(S.dest, cand.w or 2, cand.l or 4.8, settings.zoneScale) then break end
+  end
   if not info then toast('err', err) return end
   local prevPhase = S.phase
-  closeSegment()
+  local rearm = stillWanted()
   S.phase = 'spawning'           -- ignore les hooks de changement de véhicule pendant notre remplacement
-  local ok = safeCall(function()
+  local ok, perr = pcall(function()
     local cur = S.vehId and getObjectByID(S.vehId)
     local veh
     if cur then
@@ -2075,16 +2170,24 @@ function M.rerollVehicle()
       veh = core_vehicles.spawnNewVehicle(info.model, spawnOptions(info))
     end
     if not veh then error('remplacement impossible') end
+    closeSegment()
     if cur and veh:getID() ~= S.vehId then deleteVehicle(S.vehId) end
     S.vehId = veh:getID()
     S.info = info
     table.insert(S.recent, info.model)
-    S.plan = {dest = S.dest, destZone = S.zone, pickup = S.pickup, dist = S.routeDist, relaxed = S.relaxed}
+    S.plan = {dest = S.dest, destZone = S.zone, pickup = S.pickup, dist = S.routeDist, relaxed = S.relaxed, kindsRelaxed = S.kindsRelaxed}
     S.phaseTimer = 0
     S.keepTimer = {elapsed = S.elapsed, limit = S.timeLimit}
-  end, 'changement de vehicule')
-  if not ok and S then S.phase = prevPhase end
-  if S then sendState() end
+    S.rearmWanted = rearm or nil
+  end)
+  if not ok then
+    -- véhicule (souvent un mod) impossible à faire apparaître : on garde le véhicule actuel
+    log('W', logTag, 'Changement de véhicule impossible (' .. tostring(info.model) .. ') : ' .. tostring(perr))
+    badModels[info.model] = true
+    S.phase = prevPhase
+    toast('warn', 'Ce véhicule ne peut pas apparaître : tu gardes le tien, réessaie pour en avoir un autre.')
+  end
+  sendState()
 end
 
 function M.banCurrentModel()
