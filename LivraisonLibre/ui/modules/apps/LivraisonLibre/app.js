@@ -164,6 +164,11 @@ angular.module('beamng.apps')
         }
         scope.push()
       }
+      scope.setVeh = function (key, value) {
+        scope.s.veh[key] = value
+        scope.push()
+        api('requestVehicles')
+      }
       scope.setTraffic = function (key, value) {
         scope.s.traffic[key] = value
         scope.push()
@@ -181,16 +186,17 @@ angular.module('beamng.apps')
       scope.toggleCollapsed = function () {
         scope.ui.collapsed = !scope.ui.collapsed
         saveUi()
-        if (!scope.ui.collapsed && !scope.sess) onTab(scope.ui.tab)
+        if (!scope.ui.collapsed && !scope.sess) onTab(scope.ui.tab, true)
       }
       scope.setTab = function (id) {
         scope.ui.tab = id
         saveUi()
         onTab(id)
       }
-      function onTab (id) {
+      function onTab (id, auto) {
         if (id === 'vehicules') api('requestVehicles')
-        if (id === 'lieux' && scope.state && scope.state.level && !scope.state.levelReady) api('requestMapInfo')
+        // l'analyse de la map ne se lance que sur un clic (jamais automatiquement à l'ouverture)
+        if (id === 'lieux' && !auto && scope.state && scope.state.level && !scope.state.levelReady && !scope.state.analysing) api('requestMapInfo')
         if (id === 'points' || id === 'trafic' || id === 'stats') api('requestState')
       }
 
@@ -378,7 +384,7 @@ angular.module('beamng.apps')
               if (uiPrefs.tab) scope.ui.tab = uiPrefs.tab
               if (uiPrefs.collapsed !== undefined) scope.ui.collapsed = !!uiPrefs.collapsed
             }
-            if (!scope.ui.collapsed && !scope.sess) onTab(scope.ui.tab)
+            if (!scope.ui.collapsed && !scope.sess) onTab(scope.ui.tab, true)
           }
         })
       })

@@ -26,16 +26,19 @@ Parce qu'il tourne toujours entre les mêmes garages. Ici les destinations vienn
 
 - 🗺️ **Destinations aléatoires** sur le réseau routier de la map : bords de route, parkings, lieux d'intérêt, maisons et allées privées — ou **tes propres points** enregistrés
 - 📏 **Distance min / max par la route** (pas à vol d'oiseau), routes bitumées seulement ou terre incluse, voies rapides évitables
-- 🚗 **Véhicule aléatoire** parmi tous ceux installés, mods compris : filtres par catégorie, époque, variante et source, liste noire, jamais de props ni de remorques
+- 🚗 **Véhicule aléatoire** parmi tous ceux installés, mods compris : filtres par catégorie, époque, variante, source et **boîte de vitesses** (auto, manuelle ou les deux), liste noire, jamais de props ni de remorques
 - 🅿️ **Zone P au sol** à 1,3× la taille du véhicule, rouge → bleue quand tu es entièrement dedans, avec un trait de 2 m au centre de la place
 - ✋ **Validation au frein à main**, ou **validation éclair** : 0,25 s après le frein à main, la livraison suivante est déjà lancée
 - 🧭 **Départ dans le sens du GPS**, peinture aléatoire, temps limite optionnel
 - ⏱️ **Perfs honnêtes** : chrono lancé à la 1re accélération et arrêté à 50 m de la zone — le stationnement est mesuré à part
-- 🚓 **Trafic et police** : sans trafic, avec trafic, patrouilles (ratio police / civils réglable) ou recherché, avec **jusqu'à 5 étoiles** qui montent tant que tu fuis
+- 🚓 **Trafic et police** : sans trafic, avec trafic, patrouilles (ratio police / civils réglable) ou recherché, avec **jusqu'à 5 étoiles** qui montent tant que tu fuis — et une **difficulté qui suit les étoiles** : la police te suit à 1 étoile, te fonce dessus à partir de 3, multiplie barrages et véhicules lourds à 5
 - 🔕 **Les PNJ ignorent les sirènes** pendant les livraisons — ils continuent de rouler au lieu de se ranger — et la police est écartée à moins de 100 m de l'arrivée pour te garer tranquille
-- 📊 **Écran de résumé** séparé, affiché de 3 à 15 s : temps, moyenne, distance, étoiles atteintes et temps survécu en poursuite, et une 🏆 coupe quand tu bats un record
+- 📊 **Écran de résumé** séparé, affiché de 3 à 15 s : image du véhicule, temps, moyenne, distance, étoiles atteintes et temps survécu en poursuite, et une 🏆 coupe quand tu bats un record
+- 🅿️ **Place toujours libre** : la place de livraison est réservée auprès du système de parking du jeu, et une voiture garée qui s'y trouverait quand même est déplacée ailleurs avant ton arrivée
+- 🎮 **Volant calme pendant les chargements** : le retour de force est coupé pendant le spawn et le chargement du trafic, puis rendu une fois l'image revenue
 - 📝 **Journal de chaque livraison** en CSV (s'ouvre dans Excel) : véhicule(s), distance, vitesses, resets, dégâts, changements de véhicule, trafic, police…
 - 💾 **Tous les réglages sauvegardés** ; pendant une mission, le panneau n'affiche que la mission en cours
+- 🧩 **Maps de mods** : l'analyse de la map se fait en arrière-plan, étalée sur plusieurs images — le jeu ne se fige pas, même sur une map lourde
 
 <div align="center">
 <img src="screenshots/02_trafic.png" width="260" alt="Onglet Trafic">
@@ -56,7 +59,7 @@ Parce qu'il tourne toujours entre les mêmes garages. Ici les destinations vienn
 
 ## Comment ça marche
 
-Au lancement, le mod construit son propre graphe à partir du réseau routier de la map, repère les impasses privées (les allées de maisons) et y ajoute les places de parking et lieux d'intérêt fournis par la map. Un Dijkstra borné choisit ensuite une destination dont la distance **par la route** tombe dans ta fourchette, sur une place libre et assez grande pour le véhicule tiré.
+Au lancement, le mod construit son propre graphe à partir du réseau routier de la map (par petites tranches, quelques millisecondes par image, avec un délai maximal), repère les impasses privées (les allées de maisons) et y ajoute les places de parking et lieux d'intérêt fournis par la map. Un Dijkstra borné choisit ensuite une destination dont la distance **par la route** tombe dans ta fourchette, sur une place libre et assez grande pour le véhicule tiré.
 
 La zone au sol est le marquage « P » du jeu, redimensionné à la taille du véhicule ; elle passe au bleu dès que la boîte englobante du véhicule est entièrement dedans. Si tu changes de véhicule en route, la zone s'adapte — et si le nouveau ne rentre pas, la livraison passe à la place compatible la plus proche. Un véhicule avec lequel tu as roulé moins de 500 m n'est pas noté dans le journal.
 
@@ -66,10 +69,23 @@ Le résumé attend la fin de l'écran de chargement suivant pour s'afficher — 
 - `stats.json` — compteurs et records
 - `livraisons.csv` / `livraisons.json` — une ligne par livraison (ferme Excel pendant que tu joues, sinon le CSV ne peut pas être mis à jour)
 - `points/<map>.json` — tes points de livraison
+- `analyse.txt` — les étapes de la dernière analyse de map (utile si une map pose problème)
 
 ## Police, étoiles et sirènes
 
 En mode **Recherché**, chaque livraison démarre avec le nombre d'étoiles choisi (1 à 5). Ensuite c'est le jeu qui fait monter la note : plus tu fuis longtemps et vite, et plus tu enchaînes les infractions, plus le score de poursuite grimpe. Le mod le traduit en **0 à 5 étoiles** (paliers 100 / 300 / 500 / 1200 / 2000), affichées dans le panneau et dans le résumé avec le temps passé en fuite.
+
+Avec la **difficulté progressive** (activée par défaut), chaque étoile compte :
+
+| Étoiles | Comportement de la police |
+|---|---|
+| ★ | Elle te suit, gyrophares allumés, sans te foncer dessus. Facile à semer. |
+| ★★ | Elle te colle de plus près. |
+| ★★★ | Poursuite agressive : elle te fonce dessus. |
+| ★★★★ | Plus agressive encore, plus dure à semer, des renforts arrivent. |
+| ★★★★★ | Barrages fréquents, renforts en priorité avec les véhicules lourds (blindé, pick-up, SUV), très dure à semer. |
+
+Quand le mod crée lui-même la police, environ un tiers des voitures de police sont des véhicules lourds du jeu.
 
 <div align="center">
 <img src="screenshots/06_resume_police.png" width="420" alt="Résumé d'une livraison ratée à 5 étoiles">

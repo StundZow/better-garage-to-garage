@@ -69,18 +69,19 @@ const meta = {
   epochs: [{id: 'ancienne', label: 'Anciennes (< 1980)'}, {id: 'retro', label: 'Années 80-90'}, {id: 'moderne', label: 'Modernes (2000+)'}, {id: 'inconnue', label: 'Année inconnue'}],
   variants: [{id: 'usine', label: 'Série'}, {id: 'custom', label: 'Préparées / custom'}, {id: 'course', label: 'Course, rallye & drift'}, {id: 'police', label: 'Police'}, {id: 'service', label: 'Services & secours'}],
   sources: [{id: 'officiel', label: 'Officiels BeamNG'}, {id: 'mod', label: 'Mods'}, {id: 'perso', label: 'Mes configs'}],
+  transmissions: [{id: 'both', label: 'Les deux'}, {id: 'auto', label: 'Automatique'}, {id: 'manual', label: 'Manuelle'}],
 }
 let settings = {
   version: 1, locMode: 'random', locKinds: {road: true, parking: true, poi: true, home: true}, surface: 'paved',
   minDist: 600, maxDist: 3500, avoidHighways: true, pavedThreshold: 0.7, zoneScale: 1.3, validation: 'handbrake',
   firstStartHere: false, keepOwnVehicle: false, fade: true, timeLimit: false, avgSpeedKmh: 45, timeBonus: 60,
-  randomPaint: true, autoNext: true, instantNext: false, summaryDuration: 5, showCenterPost: true, showBeam: true, showArrow: true,
-  traffic: {mode: 'on', amount: 12, parked: 6, police: 'wanted', strictness: 0.5, wantedLevel: 2, policeRatio: 0.25, arrestFails: true, removeOnStop: true, civiliansIgnoreSirens: true, policeNoSiren: false, clearPoliceNearEnd: true},
+  randomPaint: true, autoNext: true, instantNext: false, summaryDuration: 5, showCenterPost: true, showBeam: true, showArrow: true, ffbGuard: true,
+  traffic: {mode: 'on', amount: 12, parked: 6, police: 'wanted', strictness: 0.5, wantedLevel: 2, policeRatio: 0.25, arrestFails: true, removeOnStop: true, civiliansIgnoreSirens: true, policeNoSiren: false, clearPoliceNearEnd: true, progressive: true},
   ui: {tab: 'options', collapsed: false},
   veh: {cats: {citadine: true, berline: true, familiale: true, coupe: true, sport: true, suv: true, pickup: true, utilitaire: true, camion: false, bus: false, toutterrain: false, engin: false, autre: true},
         epochs: {ancienne: true, retro: true, moderne: true, inconnue: true},
         variants: {usine: true, custom: true, course: false, police: false, service: false},
-        sources: {officiel: true, mod: true, perso: false}, blacklist: []}
+        sources: {officiel: true, mod: true, perso: false}, transmission: 'both', blacklist: []}
 }
 let stats = {delivered: 12, failed: 2, skipped: 1, distance: 48200, time: 4210, bestAvg: 71.4, fastest: {time: 95, dist: 1200}, longest: 6800, streak: 3, bestStreak: 7,
   history: [
@@ -110,7 +111,7 @@ function state() {
     journal: {count: 37, path: 'C:\Users\toi\AppData\Local\BeamNG\BeamNG.drive\current\settings\livraisonLibre\livraisons.csv'}}
 }
 function sendState() { send('LivraisonLibreState', state()) }
-const vehicle = {name: 'ETK 800-Series 856x Sport (M)', brand: 'ETK', years: '2013-2018', preview: '/vehicles/etk800/856x.jpg', model: 'etk800', cat: 'familiale', variant: 'usine'}
+const vehicle = {name: 'ETK 800-Series 856x Sport (M)', brand: 'ETK', years: '2013-2018', preview: '/car.png', model: 'etk800', cat: 'familiale', variant: 'usine', trans: 'Manuelle'}
 const baseSession = {count: 4, vehicle: vehicle, from: {kind: 'parking', kindLabel: 'Parking', label: 'Parking'}, to: {kind: 'poi', kindLabel: "Lieu d'intérêt", label: 'levels.west_coast_usa.gasStationPoints.apex.title'}, routeDist: 2340}
 
 H.handle = function (fn, args) {
@@ -141,7 +142,7 @@ H.scenario = function (name) {
     if (name === 'inzone') Object.assign(hud, {distLeft: 1, progress: 1, near: true, inZone: true, speedKmh: 0})
     if (name === 'validating') Object.assign(hud, {distLeft: 1, progress: 1, near: true, inZone: true, speedKmh: 0, parkBrake: true, validate: 0.6})
     if (name === 'timelimit') Object.assign(hud, {timeLeft: 11, distLeft: 420, progress: 0.82}), session.timeLimit = 240
-    if (name === 'summary') { session.phase = 'summary'; session.count = 5; session.summary = {ok: true, time: 182, dist: 2340, avg: 46.3, record: true}; hud = {phase: 'summary'} }
+    if (name === 'summary') { session.phase = 'summary'; session.count = 5; session.summary = {ok: true, time: 182, dist: 2340, avg: 46.3, record: true, maxStars: 3, pursuitTime: 97, policeActive: true}; hud = {phase: 'summary'} }
     if (name === 'failed') { session.phase = 'failed'; session.summary = {ok: false, time: 240}; hud = {phase: 'failed'} }
     if (name === 'lost') { session.phase = 'lost'; session.message = 'Véhicule de livraison perdu. Choisis « Autre véhicule » ou « Passer ».'; hud = {phase: 'lost'} }
   }
@@ -149,7 +150,7 @@ H.scenario = function (name) {
   send('LivraisonLibreHud', hud)
 }
 H.summary = function (ok, preview) {
-  send('LivraisonLibreSummary', {ok: ok, preview: !!preview, reason: ok ? null : 'Arrêté par la police', count: 5, showFor: 5,
+  send('LivraisonLibreSummary', {ok: ok, isPreview: !!preview, preview: '/car.png', reason: ok ? null : 'Arrêté par la police', count: 5, showFor: 5,
     vehicle: 'ETK 800-Series 856x Sport (M)', from: 'Parking', to: 'levels.west_coast_usa.gasStationPoints.apex.title',
     tripTime: 182, totalTime: 205, parkTime: ok ? 14 : null, plannedDist: 2340, tripDist: 2290, driven: 2410,
     avgKmh: 45.3, vmaxKmh: 96, resets: 2, damage: 1350, switches: 1, pursuits: 1, arrests: ok ? 0 : 1,

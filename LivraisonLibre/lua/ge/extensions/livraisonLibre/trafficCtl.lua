@@ -34,6 +34,10 @@ end]]
 local NO_SIREN_OFF = [[if electrics and electrics._llOrigLightbar then electrics.set_lightbar_signal = electrics._llOrigLightbar; electrics._llOrigLightbar = nil end]]
 local patched = {}       -- vehId -> {ignore = bool, noSiren = bool}
 
+local function isPolice(veh)
+  return type(veh) == 'table' and ((veh.role and veh.role.name) or veh.roleName) == 'police'
+end
+
 local function ext(name)
   if not _G[name] and extensions and extensions.load then pcall(extensions.load, name) end
   return _G[name]
@@ -85,6 +89,7 @@ function M.apply(t, levelName)
         if not group[1] then
           for i = 1, count do group[i] = {model = 'fullsize', config = 'police'} end
         end
+        if t.progressive ~= false and count >= 2 then group = M.addHeavyPolice(group, 0.34) end
         return group
       end,
     })
@@ -164,9 +169,9 @@ function M.updateSirenPatches(ignore, noSiren)
     local obj = getObjectByID(id)
     if obj and veh.isAi then
       local p = patched[id] or {}
-      local isPolice = veh.roleName == 'police'
+      local policeVeh = isPolice(veh)
       local wantIgnore = ignore and true or false
-      local wantNoSiren = (noSiren and isPolice) and true or false
+      local wantNoSiren = (noSiren and policeVeh) and true or false
       if wantIgnore then pcall(obj.queueLuaCommand, obj, IGNORE_SIRENS_ON)
       elseif p.ignore then pcall(obj.queueLuaCommand, obj, IGNORE_SIRENS_OFF) end
       if wantNoSiren then pcall(obj.queueLuaCommand, obj, NO_SIREN_ON)
@@ -226,7 +231,7 @@ function M.clearPoliceNear(playerId, pos, radius)
   if not ok or type(data) ~= 'table' then return 0 end
   local moved, r2 = 0, (radius or 300) ^ 2
   for id, veh in pairs(data) do
-    if veh.isAi and veh.roleName == 'police' and id ~= playerId then
+    if veh.isAi and isPolice(veh) and id ~= playerId then
       local obj = getObjectByID(id)
       if obj then
         local p = obj:getPosition()
@@ -238,6 +243,179 @@ function M.clearPoliceNear(playerId, pos, radius)
     end
   end
   return moved
+end
+
+-- Places du système de parking du jeu qui chevauchent la zone de livraison : marquées occupées pour
+-- qu'aucune voiture garée n'y soit placée (le jeu peut utiliser sa propre copie des places, différente
+-- de celle lue par le mod). Renvoie la liste des places marquées.
+function M.reserveParkingNear(x, y, z, radius, val)
+  local out = {}
+  local gp = _G.gameplay_parking
+  if not gp or not gp.getParkingSpots then return out end
+  local ok, list = pcall(gp.getParkingSpots)
+  if not ok or type(list) ~= 'table' or type(list.sorted) ~= 'table' then return out end
+  local r2 = radius * radius
+  for _, ps in ipairs(list.sorted) do
+    local p = type(ps) == 'table' and ps.pos
+    if p and ps.vehicle == nil and not ps.missing then
+      local dx, dy, dz = p.x - x, p.y - y, p.z - z
+      if dx * dx + dy * dy <= r2 and math.abs(dz) < 4 then
+        ps.vehicle = val
+        out[#out + 1] = ps
+      end
+    end
+  end
+  return out
+end
+
+-- Déplace ailleurs les voitures garées (et les PNJ arrêtés) posés sur la zone de livraison.
+-- ignore : {vehId = true} (véhicule de livraison, véhicule du joueur). Renvoie le nombre de véhicules déplacés.
+function M.clearZone(zone, ignore)
+  if not zone or not be then return 0 end
+  local gp, gt = _G.gameplay_parking, _G.gameplay_traffic
+  local parked, traffic
+  if gp and gp.getParkedCarsData then
+    local ok, d = pcall(gp.getParkedCarsData)
+    if ok and type(d) == 'table' then parked = d end
+  end
+  if gt and gt.getTrafficData then
+    local ok, d = pcall(gt.getTrafficData)
+    if ok and type(d) == 'table' then traffic = d end
+  end
+  if not parked and not traffic then return 0 end
+  local r = math.sqrt((zone.w * 0.5) ^ 2 + (zone.l * 0.5) ^ 2) + 1.5
+  local pos = vec3(zone.x, zone.y, zone.z)
+  local moved = 0
+  for i = 0, be:getObjectCount() - 1 do
+    local obj = be:getObject(i)
+    local id = obj and obj:getID()
+    if id and not (ignore and ignore[id]) then
+      local x, y, z = be:getObjectOOBBCenterXYZ(id)
+      local dx, dy, dz = x - zone.x, y - zone.y, z - zone.z
+      if dx * dx + dy * dy < r * r and math.abs(dz) < 4 then
+        if parked and parked[id] and gp.forceTeleport then
+          if pcall(gp.forceTeleport, id, pos, 150, 800) then moved = moved + 1 end
+        elseif traffic and traffic[id] and traffic[id].isAi and (tonumber(traffic[id].speed) or 0) < 1 and gt.forceTeleport then
+          if pcall(gt.forceTeleport, id, pos, nil, 300, 900) then moved = moved + 1 end
+        end
+      end
+    end
+  end
+  return moved
+end
+
+-- Difficulté progressive selon les étoiles. Le jeu a 3 comportements : niveau 1 = la police suit sans
+-- foncer (1-2 étoiles), niveau 2 = poursuite agressive (3-4 étoiles), niveau 3 = barrages (5 étoiles).
+-- On ajuste en plus, étoile par étoile : agressivité de l'IA, fréquence des barrages, difficulté pour
+-- semer la police et renforts amenés près du joueur.
+M.STAR_TUNING = {
+  {aggression = 0.3,  roadblock = 0,   evadeTime = 25, evadeRadius = 70,  reinforce = 0},
+  {aggression = 0.5,  roadblock = 0,   evadeTime = 35, evadeRadius = 80,  reinforce = 0},
+  {aggression = 0.9,  roadblock = 0.3, evadeTime = 45, evadeRadius = 90,  reinforce = 0},
+  {aggression = 1.1,  roadblock = 0.6, evadeTime = 60, evadeRadius = 110, reinforce = 1},
+  {aggression = 1.25, roadblock = 1.0, evadeTime = 80, evadeRadius = 130, reinforce = 2},
+}
+local DEFAULT_PURSUIT_VARS = {roadblockFrequency = 0.5, evadeTime = 45, evadeRadius = 80}
+-- voitures de police lourdes (contenu officiel) mêlées aux patrouilles créées par le mod
+M.HEAVY_POLICE = {
+  {model = 'roamer', config = 'police'},
+  {model = 'midtruck', config = '4x4_police_petrol'},
+  {model = 'bastion', config = 'police_v8_awd_A'},
+  {model = 'md_series', config = 'md_60_armored_police'},
+}
+local HEAVY_MODELS = {roamer = true, midtruck = true, bastion = true, md_series = true}
+local tune = {stars = -1, aggr = {}, reinforceTimer = 5}
+
+-- Remplace une partie d'un groupe de police par des véhicules lourds (si le jeu les a).
+function M.addHeavyPolice(group, share)
+  if type(group) ~= 'table' or not group[1] then return group end
+  local cv = _G.core_vehicles
+  local avail = {}
+  for _, h in ipairs(M.HEAVY_POLICE) do
+    local ok, m = true, nil
+    if cv and cv.getModel then ok, m = pcall(cv.getModel, h.model) end
+    if not cv or not cv.getModel or (ok and m and m.model) then avail[#avail + 1] = h end
+  end
+  if not avail[1] then return group end
+  local n = math.floor(#group * (share or 0.34) + 0.5)
+  for i = 1, n do
+    local h = avail[((i - 1) % #avail) + 1]
+    local slot = #group - i + 1
+    if slot >= 1 then group[slot] = {model = h.model, config = h.config} end
+  end
+  return group
+end
+
+function M.resetTuning()
+  if tune.stars ~= -1 then
+    local police = _G.gameplay_police
+    if police and police.setPursuitVars then pcall(police.setPursuitVars, DEFAULT_PURSUIT_VARS) end
+  end
+  tune = {stars = -1, aggr = {}, reinforceTimer = 5}
+end
+
+-- À appeler régulièrement pendant une livraison (playerId : véhicule poursuivi, stars : 0 à 5).
+function M.tunePolice(playerId, stars, dt)
+  local police, gt = _G.gameplay_police, _G.gameplay_traffic
+  if not police or not gt or not gt.getTrafficData or not playerId then return end
+  stars = stars or 0
+  local t = M.STAR_TUNING[stars]
+  if stars ~= tune.stars then
+    tune.stars = stars
+    tune.aggr = {}
+    if police.setPursuitVars then
+      pcall(police.setPursuitVars, t and {roadblockFrequency = t.roadblock, evadeTime = t.evadeTime, evadeRadius = t.evadeRadius} or DEFAULT_PURSUIT_VARS)
+    end
+  end
+  if not t then return end
+  local ok, data = pcall(gt.getTrafficData)
+  if not ok or type(data) ~= 'table' then return end
+
+  -- agressivité des voitures qui poursuivent le joueur
+  local idle = {}
+  for id, veh in pairs(data) do
+    if veh.isAi and isPolice(veh) and id ~= playerId then
+      local chasing = veh.role and veh.role.flags and veh.role.flags.pursuit and veh.role.targetId == playerId
+      if chasing then
+        if tune.aggr[id] ~= t.aggression then
+          local obj = getObjectByID(id)
+          if obj then pcall(obj.queueLuaCommand, obj, 'ai.setAggression(' .. t.aggression .. ')') end
+          tune.aggr[id] = t.aggression
+        end
+      elseif not (veh.role and veh.role.flags and (veh.role.flags.roadblock or veh.role.flags.cooldown)) then
+        idle[#idle + 1] = {id = id, veh = veh}
+      end
+    end
+  end
+
+  -- renforts (4-5 étoiles) : des voitures de police éloignées sont amenées près du joueur, hors de vue
+  if t.reinforce > 0 and gt.forceTeleport and idle[1] then
+    tune.reinforceTimer = tune.reinforceTimer - (dt or 0)
+    if tune.reinforceTimer <= 0 then
+      tune.reinforceTimer = 20
+      local pobj = getObjectByID(playerId)
+      if pobj then
+        local ppos, pdir = pobj:getPosition(), pobj:getDirectionVector()
+        -- les plus lointaines d'abord, les lourdes en priorité à 5 étoiles
+        for _, it in ipairs(idle) do
+          local o = getObjectByID(it.id)
+          it.d = o and (o:getPosition() - ppos):length() or 0
+          it.heavy = HEAVY_MODELS[tostring(it.veh.model or '')] and 1 or 0
+        end
+        table.sort(idle, function(a, b)
+          if stars >= 5 and a.heavy ~= b.heavy then return a.heavy > b.heavy end
+          return a.d > b.d
+        end)
+        local sent = 0
+        for _, it in ipairs(idle) do
+          if sent >= t.reinforce then break end
+          if it.d > 450 then
+            if pcall(gt.forceTeleport, it.id, ppos, pdir, 180, 400) then sent = sent + 1 end
+          end
+        end
+      end
+    end
+  end
 end
 
 function M.pursuitMode(vehId)

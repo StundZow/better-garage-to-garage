@@ -402,3 +402,15 @@ livraison-libre { display: block; width: 100%; height: 100%; }
 .ll-pursuit { display: none; }
 .ll-tabs { padding: 6px 4px 0; gap: 0; }
 .ll-tab { font-size: 9.5px; letter-spacing: -0.2px; }
+
+/* ---------- v1.3 ---------- */
+.ll-result-wanted { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.ll-result-chrono { display: inline-flex; align-items: center; gap: 4px; color: #ffd34d; font-weight: 700; }
+.ll-result-chrono svg { width: 15px; height: 15px; fill: currentColor; }
+.ll-spin { display: inline-block; width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25); border-top-color: currentColor; animation: ll-spin 0.8s linear infinite; }
+@keyframes ll-spin { to { transform: rotate(360deg); } }
+.ll-analysing { display: flex; align-items: center; flex-wrap: wrap; }
+.ll-analysing em { font-style: normal; opacity: 0.7; margin-left: 4px; }
+.ll-hrow-sub .ll-stars-mini svg { width: 12px; height: 12px; }
+.ll-tag-alt { background: rgba(120, 170, 255, 0.14); color: #a9c8ff; }

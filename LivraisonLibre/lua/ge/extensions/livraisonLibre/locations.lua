@@ -34,8 +34,10 @@ function M.buildRoadSpots(g, opts)
   local junctionMargin = opts.junctionMargin or 18
   local minEdgeLen = opts.minEdgeLen or 20
   local minUpZ = opts.minUpZ or 0.94
+  local step = graph.ticker(opts.tick)
   local out = {}
   for ei = 1, g.ne do
+    step()
     local e = g.edges[ei]
     if not e.private and e.len >= minEdgeLen then
       local a, b = e.a, e.b
@@ -77,8 +79,10 @@ end
 -- Culs-de-sac de routes privées = allées de maisons / garages.
 function M.buildDeadEnds(g, opts)
   opts = opts or {}
+  local step = graph.ticker(opts.tick)
   local out = {}
   for i = 1, g.n do
+    step()
     if g.deg[i] == 1 then
       local ei = g.adj[i][1]
       local e = g.edges[ei]
@@ -105,11 +109,14 @@ end
 -- spots : {name, label, kind, x, y, z, fx, fy, fz, w, l}
 function M.attachSpots(g, spots, opts)
   opts = opts or {}
+  local step = graph.ticker(opts.tick)
   local out = {}
   local taken = {}
   for k, s in ipairs(spots or {}) do
-    local hk = floor(s.x / 1.5) .. ':' .. floor(s.y / 1.5) .. ':' .. floor(s.z / 3)
-    if not taken[hk] then
+    step()
+    local hk = graph.finite(s.x) and graph.finite(s.y) and graph.finite(s.z)
+      and (floor(s.x / 1.5) .. ':' .. floor(s.y / 1.5) .. ':' .. floor(s.z / 3)) or nil
+    if hk and not taken[hk] then
       taken[hk] = true
       local ei, t, d = graph.nearestEdge(g, s.x, s.y, s.z, opts.maxAttach or 70, nil, 8)
       if ei then
@@ -132,7 +139,7 @@ end
 function M.attachCustom(g, points)
   local out = {}
   for _, p in ipairs(points or {}) do
-    if p.pos then
+    if type(p) == 'table' and type(p.pos) == 'table' and graph.finite(p.pos.x) and graph.finite(p.pos.y) and graph.finite(p.pos.z) then
       local fx, fy, fz = norm3(p.dir and p.dir.x or 0, p.dir and p.dir.y or 1, p.dir and p.dir.z or 0)
       local c = {
         id = 'c' .. tostring(p.id), pointId = p.id, kind = 'custom', label = p.name,

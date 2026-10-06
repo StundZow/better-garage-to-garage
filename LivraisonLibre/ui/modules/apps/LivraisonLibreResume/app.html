@@ -8,8 +8,9 @@
       </div>
       <div class="llr-title">
         <div class="llr-title-main">{{ sum.ok ? 'Livraison validée !' : (sum.reason || 'Livraison ratée') }}</div>
-        <div class="llr-title-sub"><span ng-if="sum.preview">Aperçu · </span>{{ sum.vehicle }}</div>
+        <div class="llr-title-sub"><span ng-if="sum.isPreview">Aperçu · </span>{{ sum.vehicle }}</div>
       </div>
+      <img class="llr-car" ng-if="sum.preview" ng-src="{{ sum.preview }}" onerror="this.style.display='none'">
     </div>
 
     <div class="llr-big">
@@ -18,7 +19,7 @@
       <div><b>{{ fmtDist(sum.plannedDist) }}</b><span>Distance</span></div>
     </div>
 
-    <div class="llr-wanted" ng-if="sum.policeActive" title="Étoiles de recherche atteintes et temps passé en poursuite">
+    <div class="llr-wanted" ng-if="sum.policeActive || sum.maxStars > 0" title="Étoiles de recherche atteintes et temps passé en poursuite">
       <div class="llr-stars">
         <svg viewBox="0 0 24 24" ng-repeat="i in [1,2,3,4,5]" ng-class="{'llr-star-on': sum.maxStars >= i}"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
       </div>

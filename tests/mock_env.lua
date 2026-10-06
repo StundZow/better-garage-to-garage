@@ -173,7 +173,13 @@ local function vmFor(veh)
       vm.mapmgr.objects = {[1] = {states = {lightbar = 2}}, [2] = {states = {}}}
       return vm.mapmgr.objects
     end
-    vm.obj = {queueGameEngineLua = function(self, s) assert(load(s, 'ge', 't', _G))() end}
+    vm.obj = {queueGameEngineLua = function(self, s) assert(load(s, 'ge', 't', _G))() end,
+      sendForceFeedback = function(self, id, f) veh.ffbForce = f end}
+    vm.pcall = pcall
+    vm.ai = {setAggression = function(x) veh.aiAggression = x end}
+    -- retour de force (lua/vehicle/hydros.lua)
+    vm.hydros = {enableFFB = true, getFFBID = function() return 0 end,
+      getForceFeedbackFunction = function() return function(o, id, f) veh.ffbForce = f end end}
     veh.vm = vm
   end
   veh.vm.electrics.values.parkingbrake = veh.parkbrake
@@ -185,7 +191,9 @@ env.vmFor = vmFor
 function env.flushVlua()
   local cmds = env.vluaCmds
   env.vluaCmds = {}
+  env.vluaLog = env.vluaLog or {}
   for _, c in ipairs(cmds) do
+    table.insert(env.vluaLog, c)
     local fn, err = load(c.cmd, 'vlua', 't', vmFor(c.veh))
     assert(fn, 'vlua syntax error: ' .. tostring(err) .. ' in ' .. c.cmd)
     fn()
@@ -338,6 +346,14 @@ gameplay_parking = {
   deleteVehicles = function() env.traffic.parked = 0 end,
   scatterParkedCars = function() env.traffic.parkedScatters = (env.traffic.parkedScatters or 0) + 1 end,
   getParkedCarsAmount = function() return env.traffic.parked end,
+  getParkingSpots = function() return env.parkingSpots end,
+  getParkedCarsData = function() return env.parkedData or {} end,
+  forceTeleport = function(id, pos, minDist, maxDist)
+    env.parkedTeleported = env.parkedTeleported or {}
+    table.insert(env.parkedTeleported, id)
+    local v = env.vehicles[id]
+    if v then v.pos = vec3(pos.x + 500, pos.y, pos.z) end
+  end,
 }
 env.pursuitMode = 0
 gameplay_police = {

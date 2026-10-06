@@ -81,3 +81,9 @@ livraison-libre-resume { display: block; width: 100%; height: 100%; pointer-even
 .llr-wanted-time { display: flex; align-items: center; gap: 5px; font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; color: #ffe38a; }
 .llr-wanted-time svg { width: 18px; height: 18px; fill: #ffe38a; }
 .llr-line { margin-top: 10px; color: var(--llr-muted); font-size: 12.5px; text-align: center; }
+
+/* ---------- v1.3 : image du véhicule en haut à droite ---------- */
+.llr-head { display: flex; align-items: center; }
+.llr-title { flex: 1 1 auto; min-width: 0; }
+.llr-car { flex: 0 0 auto; width: 104px; height: 58px; margin-left: 10px; object-fit: cover; border-radius: 9px;
+  border: 1px solid var(--llr-line); background: rgba(255, 255, 255, 0.04); }

@@ -26,7 +26,7 @@ local function cfg(model, key, extra)
   return c
 end
 env.configs = {
-  cfg('sedanx', 'base'), cfg('sedanx', 'sport', {['0-100 km/h'] = 4.9}), cfg('sedanx', 'police', {['Config Type'] = 'Police'}),
+  cfg('sedanx', 'base', {Transmission = 'Automatic'}), cfg('sedanx', 'sport', {['0-100 km/h'] = 4.9, Transmission = 'Manual'}), cfg('sedanx', 'police', {['Config Type'] = 'Police'}),
   cfg('oldie', 'base'), cfg('hauler', 'base'), cfg('cone', 'base'), cfg('trailer', 'base'),
   cfg('sedanx', 'traffic', {Type = 'PropTraffic'}),
 }
@@ -403,7 +403,7 @@ check(env.beams == beamsBefore, 'colonne lumineuse masquée')
 check((env.markerCreated or 0) == markersBefore, 'flèche masquée')
 M.stop()
 M.previewSummary()
-check(env.events.LivraisonLibreSummary.preview == true, 'aperçu disponible')
+check(env.events.LivraisonLibreSummary.isPreview == true and env.events.LivraisonLibreSummary.preview ~= true, 'aperçu disponible (drapeau séparé de l image)')
 M.start()
 frames(60)
 deliverNow()
@@ -511,7 +511,7 @@ M.onClientEndMission()
 check(state().session == nil, 'session arrêtée au changement de map')
 
 M.previewSummary()
-check(env.events.LivraisonLibreSummary.preview == true, 'aperçu du résumé')
+check(env.events.LivraisonLibreSummary.isPreview == true, 'aperçu du résumé')
 local csvAll = env.files['/settings/livraisonLibre/livraisons.csv']
 local hdr, l1 = csvAll:match('^\239\187\191([^\r]*)\r\n([^\r]*)\r\n')
 print('  CSV en-tête : ' .. hdr)
@@ -524,20 +524,179 @@ M.openDataFolder()
 M.onExtensionUnloaded()
 check(errors() == 0, 'aucune erreur loggée')
 
-print('-- garde-fou : une erreur interne ne remonte pas au jeu')
+print('-- v1.3 : analyse de la map étalée sur plusieurs images')
+M.onClientPostStartMission('/levels/testcity/main.level.json')
+local realClock = os.clock
+local fake = 0
+os.clock = function() fake = fake + 0.004; return fake end -- chaque appel "coûte" 4 ms
+M.requestMapInfo()
+check(state().analysing == true and not state().levelReady, 'analyse en cours après la première image', tostring(state().analysing))
+frames(400)
+check(state().levelReady == true and not state().analysing, 'analyse terminée après quelques images')
+local atxt = env.files['/settings/livraisonLibre/analyse.txt']
+check(type(atxt) == 'string' and atxt:find('TERMIN'), 'étapes écrites dans analyse.txt')
+print('  ' .. tostring(atxt):gsub('\n', '\n  '))
+
+print('-- v1.3 : analyse trop longue -> abandon avec message, le jeu continue')
+M.onClientPostStartMission('/levels/testcity/main.level.json')
+os.clock = function() fake = fake + 20; return fake end -- chaque appel "coûte" 20 s
+M.requestMapInfo()
+frames(200)
+check(not state().analysing and not state().levelReady, 'analyse abandonnée')
+local tmsg = env.events.LivraisonLibreToast and env.events.LivraisonLibreToast.msg
+check(tmsg and tmsg:find('trop longue'), 'message « analyse trop longue »', tmsg)
+check(tostring(env.files['/settings/livraisonLibre/analyse.txt']):find('ÉCHEC'), 'échec noté dans analyse.txt')
+os.clock = realClock
+
+print('-- v1.3 : lancer sans analyse préalable')
+M.onClientPostStartMission('/levels/testcity/main.level.json')
+os.clock = function() fake = fake + 0.004; return fake end
+M.setSettings({traffic = {mode = 'keep', police = 'off'}, ffbGuard = true, instantNext = false, autoNext = true})
+M.start()
+check(state().startPending == true and not sess(), 'lancement en attente de l analyse')
+frames(400)
+os.clock = realClock
+check(sess() ~= nil, 'livraison lancée une fois la map analysée')
+frames(120)
+check(sess() and sess().phase == 'driving', 'en route', sess() and sess().phase)
+
+print('-- v1.3 : retour de force coupé pendant le chargement')
+local function vcmds(id, what)
+  local n = 0
+  for _, c in ipairs(env.vluaLog or {}) do
+    if c.veh.id == id and c.cmd:find(what, 1, true) then n = n + 1 end
+  end
+  return n
+end
+local vid1 = getPlayerVehicle(0).id
+check(env.vehicles[vid1].vm.hydros.enableFFB == true and env.vehicles[vid1].vm.hydros._llFfbHold == nil, 'retour de force actif une fois en route')
+check(vcmds(vid1, 'hydros.enableFFB = false') >= 1, 'volant coupé sur le véhicule de livraison pendant le chargement')
+check(vcmds(vid1, 'hydros.enableFFB = hydros._llFfbHold') >= 1, 'volant rendu après le retour de l image')
+env.vluaLog = {}
+M.skip()
+frames(5)
+check(vcmds(vid1, 'hydros.enableFFB = false') >= 1, 'coupé aussi au début du chargement suivant')
+frames(400)
+local vid2 = getPlayerVehicle(0).id
+check(vid2 ~= vid1 and vcmds(vid2, 'hydros.enableFFB = false') >= 1 and vcmds(vid2, 'hydros.enableFFB = hydros._llFfbHold') >= 1, 'nouveau véhicule : coupé puis rendu')
+check(env.vehicles[vid2].ffbForce == 0, 'force du volant remise à zéro au moment de la coupure')
+check(env.vehicles[vid2].vm.hydros.enableFFB == true and env.vehicles[vid2].vm.hydros._llFfbHold == nil, 'retour de force rétabli normalement')
+
+print('-- v1.3 : places du parking du jeu réservées et voiture garée déplacée')
+M.stop()
+-- places "du jeu" partout autour des noeuds de la ville (copie différente de celle du mod)
+env.parkingSpots = {sorted = {}}
+for _, n in pairs(env.nodes) do
+  table.insert(env.parkingSpots.sorted, {name = 'ps', pos = vec3(n.pos.x + 3, n.pos.y, n.pos.z)})
+end
+M.start()
+frames(400)
+check(sess() and sess().phase == 'driving', 'en route (places du jeu)')
+local z = env.lastZone
+local reserved, near = 0, 0
+for _, ps in ipairs(env.parkingSpots.sorted) do
+  local d = math.sqrt((ps.pos.x - z.x) ^ 2 + (ps.pos.y - z.y) ^ 2)
+  if d < 4 then near = near + 1; if ps.vehicle then reserved = reserved + 1 end end
+end
+check(reserved == near, 'places du jeu sur la zone réservées', reserved .. '/' .. near)
+-- une voiture garée du jeu posée sur la zone pendant que le joueur est loin
+local parkedCar = env.newVeh('sedanx', '/vehicles/sedanx/base.pc', vec3(z.x, z.y, z.z))
+env.parkedData = {[parkedCar.id] = {}}
+env.parkedTeleported = {}
+getPlayerVehicle(0).pos = vec3(z.x + 400, z.y, z.z)
+frames(90)
+check(#env.parkedTeleported == 1 and env.parkedTeleported[1] == parkedCar.id, 'voiture garée déplacée hors de la place', #env.parkedTeleported)
+-- une voiture quelconque (hors trafic) n'est jamais touchée
+local otherCar = env.newVeh('oldie', '/vehicles/oldie/base.pc', vec3(z.x, z.y, z.z))
+env.parkedTeleported = {}
+frames(90)
+check(#env.parkedTeleported == 0, 'véhicule hors trafic jamais déplacé')
+otherCar:delete(); parkedCar:delete(); env.parkedData = nil
+M.stop()
+local still = 0
+for _, ps in ipairs(env.parkingSpots.sorted) do if ps.vehicle then still = still + 1 end end
+check(still == 0, 'réservations libérées à l arrêt', still)
+env.parkingSpots = nil
+
+print('-- v1.3 : difficulté progressive selon les étoiles')
+M.setSettings({traffic = {mode = 'on', police = 'patrol', progressive = true}})
+M.start()
+frames(400)
+check(sess() and sess().phase == 'driving', 'en route (police)')
+local pvid = getPlayerVehicle(0).id
+local cop = env.newVeh('sedanx', '/vehicles/sedanx/police.pc', vec3(-2000, -2000, 10))
+local farCop = env.newVeh('sedanx', '/vehicles/sedanx/police.pc', vec3(-2900, -2900, 10))
+env.traffic.data = {
+  [cop.id] = {isAi = true, roleName = 'police', role = {name = 'police', targetId = pvid, flags = {pursuit = 1}}},
+  [farCop.id] = {isAi = true, roleName = 'police', model = 'md_series', role = {name = 'police', flags = {}}},
+}
+getPlayerVehicle(0).pos = vec3(1500, 1500, 10)
+env.vluaLog = {}
+env.pursuitData = {mode = 1, score = 120}; frames(30)
+check(env.policeVars and env.policeVars.roadblockFrequency == 0 and env.policeVars.evadeTime == 25, '1 étoile : pas de barrage, facile à semer')
+check(vcmds(cop.id, 'ai.setAggression(0.3)') == 1, '1 étoile : police peu agressive')
+env.pursuitData = {mode = 2, score = 600}; frames(30)
+check(vcmds(cop.id, 'ai.setAggression(0.9)') == 1, '3 étoiles : police agressive')
+env.traffic.teleported = {}
+env.pursuitData = {mode = 3, score = 2100}; frames(30 * 25)
+check(env.policeVars.roadblockFrequency == 1 and env.policeVars.evadeTime == 80, '5 étoiles : barrages fréquents, dur à semer')
+check(env.traffic.teleported[1] and env.traffic.teleported[1].id == farCop.id, '5 étoiles : renforts (police lourde en priorité) amenés près du joueur')
+env.pursuitData = nil
+env.traffic.data = {}
+cop:delete(); farCop:delete()
+deliverNow()
+frames(10)
+check(state().stats.history[1].maxStars == 5, 'étoiles max dans l historique', state().stats.history[1].maxStars)
+M.stop()
+check(env.policeVars.roadblockFrequency == 0.5 and env.policeVars.evadeTime == 45, 'réglages de police du jeu rétablis à l arrêt')
+M.setSettings({traffic = {mode = 'keep', police = 'off'}})
+
+print('-- v1.3 : boîte automatique / manuelle')
+-- oldie n'indique pas sa boîte : déduite de ses pièces (fichier .pc), seulement quand le filtre sert
+env.files['/vehicles/oldie/base.pc'] = {format = 2, parts = {oldie_engine = 'oldie_engine_v8', oldie_transmission = 'oldie_transmission_4M'}}
+M.setSettings({veh = {transmission = 'manual', cats = {citadine = true, berline = true, familiale = true, coupe = true, sport = true, suv = true, pickup = true, utilitaire = true, camion = false, bus = false, toutterrain = false, engin = false, autre = true}}})
+M.requestVehicles()
+local tv = state().vehicles
+check(tv.eligibleConfigs == 2, 'manuelle : sedanx sport + oldie (boîte lue dans ses pièces)', tv.eligibleConfigs)
+M.setSettings({veh = {transmission = 'auto'}})
+check(state().vehicles.eligibleConfigs == 1, 'automatique : sedanx base seulement', state().vehicles.eligibleConfigs)
+M.setSettings({veh = {transmission = 'manual'}})
+M.start()
+frames(400)
+local tvi = sess() and sess().vehicle
+check(tvi and (tvi.model == 'oldie' or tvi.name:find('sport')) and tvi.trans == 'Manuelle', 'livraison avec une boîte manuelle', tvi and (tvi.name .. ' / ' .. tostring(tvi.trans)))
+M.stop()
+check(lastRec().transmission == 'Manuelle', 'boîte notée dans le journal', lastRec().transmission)
+M.setSettings({veh = {transmission = 'both'}})
+check(state().vehicles.eligibleConfigs >= 3, 'les deux : tout revient', state().vehicles.eligibleConfigs)
+
+print('-- analyse de la map en échec : message clair, pas d exception, pas de spam')
 M.onClientPostStartMission('/levels/testcity/main.level.json')
 local realGetMap = map.getMap
 map.getMap = function() error('panne simulée') end
 local okCall = pcall(M.requestMapInfo)
 check(okCall, 'erreur interceptée (pas d exception vers le jeu)')
-check(env.events.LivraisonLibreToast and env.events.LivraisonLibreToast.msg:find('erreur interne'), 'petit message dans l app')
-local nE = 0
-for _, l in ipairs(env.logs) do if l.level == 'E' and tostring(l.msg):find('panne simulée') then nE = nE + 1 end end
-check(nE == 1, 'erreur écrite une fois dans la console avec la pile', nE)
+check(env.events.LivraisonLibreToast and env.events.LivraisonLibreToast.msg:find('Analyse de la map impossible'), 'message d analyse dans l app',
+  env.events.LivraisonLibreToast and env.events.LivraisonLibreToast.msg)
 for i = 1, 10 do pcall(M.requestMapInfo) end
-nE = 0
+local nE = 0
 for _, l in ipairs(env.logs) do if l.level == 'E' and tostring(l.msg):find('panne simulée') then nE = nE + 1 end end
 check(nE == 3, 'pas de spam dans la console (3 max)', nE)
 map.getMap = realGetMap
+
+print('-- garde-fou : une erreur interne ne remonte pas au jeu')
+local realWrite = jsonWriteFile
+jsonWriteFile = function() error('panne simulée 2') end
+okCall = pcall(M.setSettings, {minDist = 700})
+check(okCall, 'erreur interceptée par le garde-fou')
+check(env.events.LivraisonLibreToast and env.events.LivraisonLibreToast.msg:find('erreur interne'), 'petit message dans l app')
+nE = 0
+for _, l in ipairs(env.logs) do if l.level == 'E' and tostring(l.msg):find('panne simulée 2') then nE = nE + 1 end end
+check(nE == 1, 'erreur écrite une fois dans la console avec la pile', nE)
+for i = 1, 10 do pcall(M.setSettings, {minDist = 700}) end
+nE = 0
+for _, l in ipairs(env.logs) do if l.level == 'E' and tostring(l.msg):find('panne simulée 2') then nE = nE + 1 end end
+check(nE == 3, 'garde-fou : pas de spam dans la console (3 max)', nE)
+jsonWriteFile = realWrite
 print(string.format('SIM TESTS: %d passed, %d failed', passed, failed))
 assert(failed == 0, 'tests failed')

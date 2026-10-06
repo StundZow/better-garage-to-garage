@@ -12,7 +12,7 @@ local vehLib = require('/lua/ge/extensions/livraisonLibre/vehicles')
 local trafficCtl = require('/lua/ge/extensions/livraisonLibre/trafficCtl')
 local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 
-local VERSION = '1.2.1'
+local VERSION = '1.3.0'
 local DATA_DIR = '/settings/livraisonLibre/'
 local SETTINGS_FILE = DATA_DIR .. 'settings.json'
 local STATS_FILE = DATA_DIR .. 'stats.json'
@@ -29,6 +29,10 @@ local SPEED_WINDOW = 8           -- échantillons pour lisser la vitesse (pics p
 local MAX_PLAUSIBLE_SPEED = 140  -- m/s (~500 km/h) : au-delà, la mesure est ignorée
 local SUMMARY_DELAY = 0.9        -- s : délai après la fin du fondu avant d'afficher le résumé
 local POLICE_CLEAR_DIST = 100    -- m : police écartée en approche de la zone
+local ANALYSIS_BUDGET = 0.006    -- s de calcul par image pour l'analyse de la map (le jeu ne fige jamais)
+local ANALYSIS_TIMEOUT = 45      -- s : au-delà, l'analyse est abandonnée avec un message
+local ANALYSIS_FILE = DATA_DIR .. 'analyse.txt' -- étapes de la dernière analyse (diagnostic)
+local FFB_RELEASE_DELAY = 1.5    -- s après le retour de l'image avant de rendre le retour de force
 
 local abs, min, max, sqrt, floor = math.abs, math.min, math.max, math.sqrt, math.floor
 
@@ -56,12 +60,14 @@ local DEFAULTS = {
   showCenterPost = true,         -- trait vertical de 2 m au centre de la place
   showBeam = true,               -- colonne lumineuse visible de loin
   showArrow = true,              -- flèche flottante au-dessus de la zone
+  ffbGuard = true,               -- coupe le retour de force du volant pendant les chargements
   veh = {
     cats = {citadine = true, berline = true, familiale = true, coupe = true, sport = true, suv = true,
             pickup = true, utilitaire = true, camion = false, bus = false, toutterrain = false, engin = false, autre = true},
     epochs = {ancienne = true, retro = true, moderne = true, inconnue = true},
     variants = {usine = true, custom = true, course = false, police = false, service = false},
     sources = {officiel = true, mod = true, perso = false},
+    transmission = 'both',       -- 'both' | 'auto' | 'manual'
     blacklist = {},
   },
   traffic = {
@@ -75,6 +81,7 @@ local DEFAULTS = {
     civiliansIgnoreSirens = true,-- pendant les livraisons, les PNJ ne se rangent plus pour les sirènes
     policeNoSiren = false,       -- secours : police sans gyrophares ni sirènes
     clearPoliceNearEnd = true,   -- à moins de 100 m de l'arrivée : police écartée, poursuite terminée
+    progressive = true,          -- difficulté qui monte avec les étoiles (agressivité, barrages, renforts, police lourde)
     arrestFails = true,          -- une arrestation fait rater la livraison
     removeOnStop = true,         -- retire le trafic du mod à l'arrêt des livraisons
   },
@@ -96,6 +103,7 @@ local CAT_LABEL = {
   bus = 'Bus', toutterrain = 'Tout-terrain', engin = 'Engin', autre = 'Autre',
 }
 local POLICE_LABEL = {off = 'Aucune', patrol = 'Patrouilles', wanted = 'Recherché'}
+local TRANS_LABEL = {auto = 'Automatique', manual = 'Manuelle'}
 local UI_TABS = {options = true, lieux = true, vehicules = true, trafic = true, points = true, stats = true, parametres = true}
 
 local REASONS = {
@@ -115,8 +123,12 @@ local hudTimer = 0
 local marker, markerSeq = nil, 0
 local decalTbl, decalPos, decalFwd, decalScale
 local colRed, colBlue, colGreen
-local reservedPs, reservedVal
+local reservedList = {}  -- places de parking réservées pour la livraison en cours
 local writeErrorShown = false
+local analysis = nil     -- analyse de la map en cours (coroutine étalée sur plusieurs images)
+local startPending = false
+local analysisErrors = 0
+local ffbHeld = {}       -- véhicules dont le retour de force est coupé pendant un chargement
 
 ---------------------------------------------------------------------------
 -- utilitaires
@@ -195,6 +207,7 @@ local function sanitizeSettings(s)
   t.strictness = clamp(tonumber(t.strictness) or 0.5, 0.05, 1)
   t.wantedLevel = floor(clamp(tonumber(t.wantedLevel) or 1, 1, 5) + 0.5)
   t.policeRatio = clamp(tonumber(t.policeRatio) or 0.25, 0.05, 0.75)
+  s.veh.transmission = oneOf(s.veh.transmission, {'both', 'auto', 'manual'}, 'both')
   s.summaryDuration = floor(clamp(tonumber(s.summaryDuration) or 5, 3, 15) + 0.5)
   if not UI_TABS[s.ui.tab] then s.ui.tab = 'options' end
   s.version = DEFAULTS.version
@@ -334,6 +347,7 @@ end
 ---------------------------------------------------------------------------
 -- données de la map (graphe, lieux)
 ---------------------------------------------------------------------------
+local sendState
 local function classifySitesFile(p)
   p = p:lower()
   if p:find('residential') or p:find('house') or p:find('home') then return 'home', 'Résidence' end
@@ -348,12 +362,45 @@ end
 
 local SKIP_SITES = {'drift', 'race', 'bounds', 'crawl', 'drag', 'rally', 'mission', 'scenario', 'timetrial', 'chase', 'derby', 'busroute'}
 
-local function loadSiteSpots(lvl)
+-- Journal des étapes de l'analyse, écrit sur le disque à chaque étape : si le jeu se fige quand même
+-- (dans une fonction du jeu), le fichier indique où.
+local traceBuf, traceT0 = {}, 0
+local function traceWrite()
+  pcall(function()
+    ensureDir(DATA_DIR)
+    if writeFile then writeFile(ANALYSIS_FILE, table.concat(traceBuf, '\n') .. '\n') end
+  end)
+end
+local function traceStart(lvl)
+  traceT0 = os.clock()
+  traceBuf = {string.format('Livraison Libre %s - analyse de la map %s - %s', VERSION, tostring(lvl), os.date('%d/%m/%Y %H:%M:%S'))}
+  traceWrite()
+end
+local function trace(msg)
+  traceBuf[#traceBuf + 1] = string.format('%8.0f ms  %s', (os.clock() - traceT0) * 1000, msg)
+  traceWrite()
+  log('I', logTag, 'analyse : ' .. msg)
+end
+
+-- fichiers *.sites.json de la map : liste déjà établie par le jeu (pas de nouvelle recherche sur le disque)
+local function levelSitesFiles(lvl, sm)
+  if sm.getSitesFilesByLevel then
+    local ok, byLevel = pcall(sm.getSitesFilesByLevel)
+    if ok and type(byLevel) == 'table' then return byLevel[lvl:lower()] or byLevel[lvl] or {} end
+  end
+  local ok, files = pcall(function() return FS:findFiles('/levels/' .. lvl .. '/', '*.sites.json', 3, true, false) end)
+  return (ok and type(files) == 'table') and files or {}
+end
+
+local function loadSiteSpots(lvl, tick, step)
+  tick = tick or function() end
+  step = step or function() end
   local spots = {}
   local sm = ensureExt('gameplay_sites_sitesManager')
   if not sm or not FS then return spots end
 
   -- noms des installations (garages, stations, vendeurs...) associés aux places de parking
+  step('installations (garages, stations, vendeurs)')
   local spotInfo = {}
   local fac = ensureExt('freeroam_facilities')
   if fac and fac.getFacilities then
@@ -362,28 +409,37 @@ local function loadSiteSpots(lvl)
       for _, list in pairs(all) do
         if type(list) == 'table' then
           for _, f in ipairs(list) do
-            local function add(n)
-              if type(n) == 'string' and not spotInfo[n] then spotInfo[n] = {label = f.name, ftype = f.type} end
+            if type(f) == 'table' then
+              local function add(n)
+                if type(n) == 'string' and not spotInfo[n] then spotInfo[n] = {label = f.name, ftype = f.type} end
+              end
+              for _, n in ipairs(f.parkingSpotNames or {}) do add(n) end
+              for _, n in ipairs(f.dropOffSpotNames or {}) do add(n) end
+              for _, ap in ipairs(f.manualAccessPoints or {}) do if type(ap) == 'table' then add(ap.psName) end end
             end
-            for _, n in ipairs(f.parkingSpotNames or {}) do add(n) end
-            for _, n in ipairs(f.dropOffSpotNames or {}) do add(n) end
-            for _, ap in ipairs(f.manualAccessPoints or {}) do if type(ap) == 'table' then add(ap.psName) end end
           end
         end
       end
     end
   end
+  tick()
 
-  local files = FS:findFiles('/levels/' .. lvl .. '/', '*.sites.json', -1, true, false) or {}
+  step('liste des fichiers de parkings')
+  local files = levelSitesFiles(lvl, sm)
   for _, file in ipairs(files) do
-    local lf = file:lower()
+    local lf = tostring(file):lower()
     local skip = false
     for _, w in ipairs(SKIP_SITES) do if lf:find(w, 1, true) then skip = true break end end
     if not skip then
+      step('parkings : ' .. tostring(file))
       local ok, sites = pcall(sm.loadSites, file)
-      if ok and sites and sites.parkingSpots and sites.parkingSpots.sorted then
+      tick()
+      if ok and type(sites) == 'table' and sites.parkingSpots and type(sites.parkingSpots.sorted) == 'table' then
         local fileKind, fileLabel = classifySitesFile(file)
+        local n = 0
         for _, ps in ipairs(sites.parkingSpots.sorted) do
+          n = n + 1
+          if n % 128 == 0 then tick() end
           if ps.pos and ps.rot and ps.scl and not ps.missing then
             local fwd = ps.rot * vec3(0, 1, 0)
             local info = ps.name and spotInfo[ps.name]
@@ -407,25 +463,33 @@ local function loadSiteSpots(lvl)
   return spots
 end
 
-local function buildLevel()
-  local lvl = levelName()
-  if not lvl then return nil, 'Aucune map chargée.' end
-  if levelData and levelData.name == lvl then return levelData end
+-- Analyse complète de la map. tick : pause/abandon (nil = d'une traite), step : étape en cours.
+local function buildLevelBody(lvl, tick, step)
+  step = step or function() end
+  step('réseau routier (navgraph)')
   local mapData = map and map.getMap and map.getMap()
-  if not mapData or not mapData.nodes or not next(mapData.nodes) then
+  if not mapData or type(mapData.nodes) ~= 'table' or not next(mapData.nodes) then
     return nil, "Cette map n'a pas de réseau routier (navgraph) utilisable."
   end
   local t0 = os.clock()
-  local g = graphLib.build(mapData.nodes)
+  step('graphe routier')
+  local g = graphLib.build(mapData.nodes, {tick = tick})
+  step(string.format('graphe : %d noeuds, %d segments, %d composantes', g.n, g.ne, g.compCount or 0))
   if g.ne == 0 then return nil, "Cette map n'a pas de routes utilisables." end
   local ld = {name = lvl, g = g}
   local rules = (map.getRoadRules and map.getRoadRules()) or {}
   ld.legalSide = rules.rightHandDrive and -1 or 1
-  ld.road = locLib.buildRoadSpots(g)
-  ld.homes = locLib.buildDeadEnds(g)
-  local okS, spots = pcall(loadSiteSpots, lvl)
-  if not okS then log('W', logTag, 'Lecture des parkings impossible : ' .. tostring(spots)); spots = {} end
-  ld.spots = locLib.attachSpots(g, spots)
+  step('bords de route')
+  ld.road = locLib.buildRoadSpots(g, {tick = tick})
+  step('allées et maisons')
+  ld.homes = locLib.buildDeadEnds(g, {tick = tick})
+  local okS, spots = pcall(loadSiteSpots, lvl, tick, step)
+  if not okS then
+    if tostring(spots):find('LL_ANALYSIS_TIMEOUT', 1, true) then error(spots, 0) end
+    log('W', logTag, 'Lecture des parkings impossible : ' .. tostring(spots)); spots = {}
+  end
+  step(string.format('rattachement de %d places de parking', #spots))
+  ld.spots = locLib.attachSpots(g, spots, {tick = tick})
   ld.cands = {}
   for _, list in ipairs({ld.road, ld.homes, ld.spots}) do
     for _, c in ipairs(list) do ld.cands[#ld.cands + 1] = c end
@@ -433,8 +497,79 @@ local function buildLevel()
   ld.customCands = locLib.attachCustom(g, getPoints(lvl))
   log('I', logTag, string.format('Map %s analysée en %.0f ms : %d noeuds, %d segments, %d bords de route, %d allées, %d places',
     lvl, (os.clock() - t0) * 1000, g.n, g.ne, #ld.road, #ld.homes, #ld.spots))
-  levelData = ld
   return ld
+end
+
+local function finishAnalysis(ld, err)
+  local a = analysis
+  analysis = nil
+  if ld then levelData = ld end
+  if a then
+    for _, cb in ipairs(a.waiters) do
+      local ok, e = pcall(cb, ld, err)
+      if not ok then log('E', logTag, 'après analyse : ' .. tostring(e)) end
+    end
+  end
+  sendState()
+end
+
+-- avance l'analyse en cours d'une tranche (appelé à chaque image)
+local function stepAnalysis()
+  local a = analysis
+  if not a then return end
+  if a.lvl ~= levelName() then analysis = nil return end
+  a.frameStart = os.clock()
+  local ok, res, err = coroutine.resume(a.co)
+  if not ok then
+    local msg = tostring(res)
+    analysisErrors = analysisErrors + 1
+    if analysisErrors <= 3 then log('E', logTag, 'Analyse de la map abandonnée : ' .. msg) end
+    trace('ÉCHEC : ' .. msg)
+    local timeout = msg:find('LL_ANALYSIS_TIMEOUT', 1, true)
+    finishAnalysis(nil, timeout
+      and ("Analyse de la map trop longue (étape : " .. tostring(a.step) .. "). Détails : settings/livraisonLibre/analyse.txt")
+      or ("Analyse de la map impossible (" .. msg:sub(1, 120) .. ")."))
+  elseif coroutine.status(a.co) == 'dead' then
+    trace(res and 'TERMINÉ' or ('ÉCHEC : ' .. tostring(err)))
+    finishAnalysis(res, err)
+  end
+end
+
+-- Lance (ou rejoint) l'analyse de la map actuelle ; cb(levelData | nil, erreur) à la fin.
+local function analyzeLevel(cb)
+  local lvl = levelName()
+  if not lvl then if cb then cb(nil, 'Aucune map chargée.') end return end
+  if levelData and levelData.name == lvl then if cb then cb(levelData) end return end
+  if analysis and analysis.lvl == lvl then
+    if cb then table.insert(analysis.waiters, cb) end
+    return
+  end
+  local a = {lvl = lvl, t0 = os.clock(), frameStart = os.clock(), waiters = {cb}, step = 'démarrage'}
+  analysis = a
+  local function tick()
+    local now = os.clock()
+    if now - a.t0 > ANALYSIS_TIMEOUT then error('LL_ANALYSIS_TIMEOUT : plus de ' .. ANALYSIS_TIMEOUT .. ' s pendant « ' .. tostring(a.step) .. ' »', 0) end
+    if now - a.frameStart > ANALYSIS_BUDGET then coroutine.yield() end
+  end
+  traceStart(lvl)
+  a.co = coroutine.create(function()
+    return buildLevelBody(lvl, tick, function(msg) a.step = msg; trace(msg) end)
+  end)
+  sendState()
+  stepAnalysis()
+end
+
+-- Données de la map, d'une traite (secours si une mission en a besoin et qu'elles manquent)
+local function buildLevel()
+  local lvl = levelName()
+  if not lvl then return nil, 'Aucune map chargée.' end
+  if levelData and levelData.name == lvl then return levelData end
+  analysis = nil
+  traceStart(lvl)
+  local ld, err = buildLevelBody(lvl, nil, trace)
+  trace(ld and 'TERMINÉ' or ('ÉCHEC : ' .. tostring(err)))
+  if ld then levelData = ld end
+  return ld, err
 end
 
 local function locFilter()
@@ -475,8 +610,18 @@ local function ensurePool()
   return vehPool
 end
 
+-- boîte de vitesses des configs qui ne l'indiquent pas : déduite des pièces, seulement si le filtre sert
+local function ensureTransmissions()
+  if vehPool and not vehPool.transInferred and settings.veh.transmission ~= 'both' then
+    local t0 = os.clock()
+    local n = vehLib.inferTransmissions(vehPool, function(p) return jsonReadFile(p) end)
+    log('I', logTag, string.format('boîte de vitesses déduite pour %d configs en %.0f ms', n, (os.clock() - t0) * 1000))
+  end
+end
+
 local function vehicleCounts()
   if not vehPool then return {loaded = false} end
+  ensureTransmissions()
   local eligible, cfgCount = vehLib.eligibleModels(vehPool, settings.veh)
   return {loaded = true, models = #vehPool.models, configs = vehPool.count, eligibleModels = #eligible, eligibleConfigs = cfgCount}
 end
@@ -484,6 +629,7 @@ end
 local function pickVehicleInfo()
   local pool = ensurePool()
   if not pool then return nil, 'Impossible de lire la liste des véhicules.' end
+  ensureTransmissions()
   local eligible = vehLib.eligibleModels(pool, settings.veh)
   if #eligible == 0 then return nil, 'Aucun véhicule ne correspond à tes filtres (onglet Véhicules).' end
   if next(badModels) then
@@ -587,19 +733,30 @@ local function groundZ(x, y, z)
   return z
 end
 
--- réserve la place de parking de destination pour que les voitures garées du jeu ne s'y mettent pas
+-- réserve la place de destination (et les places du parking du jeu qui chevauchent la zone)
+-- pour que les voitures garées du jeu ne s'y mettent pas
 local function releaseSpot()
-  if reservedPs and reservedPs.vehicle == reservedVal then reservedPs.vehicle = nil end
-  reservedPs, reservedVal = nil, nil
+  for _, r in ipairs(reservedList) do
+    if r.ps.vehicle == r.val then r.ps.vehicle = nil end
+  end
+  reservedList = {}
 end
 
-local function reserveSpot()
+local function reserveSpot(dest, zone)
   releaseSpot()
-  local ps = S and S.dest and S.dest.ps
+  dest = dest or (S and S.dest)
+  zone = zone or (S and S.zone)
+  local val = (S and S.vehId) or -1
+  local ps = dest and dest.ps
   if type(ps) == 'table' and ps.vehicle == nil then
-    reservedVal = S.vehId or -1
-    ps.vehicle = reservedVal
-    reservedPs = ps
+    ps.vehicle = val
+    reservedList[#reservedList + 1] = {ps = ps, val = val}
+  end
+  if zone and zone.w and zone.l then
+    local r = sqrt((zone.w * 0.5) ^ 2 + (zone.l * 0.5) ^ 2) + 3
+    for _, p in ipairs(trafficCtl.reserveParkingNear(zone.x, zone.y, zone.z, r, val)) do
+      reservedList[#reservedList + 1] = {ps = p, val = val}
+    end
   end
 end
 
@@ -663,6 +820,7 @@ local function sessionInfo()
     vehicle = info and {
       name = info.name, brand = info.brand, years = info.yearsText, preview = info.preview,
       model = info.model, source = info.source, cat = info.mainCat, variant = info.variant,
+      trans = info.trans and TRANS_LABEL[info.trans] or nil,
     } or nil,
     from = candInfo(S.pickup),
     to = candInfo(S.dest),
@@ -693,7 +851,7 @@ local function uiList(list)
 end
 local UI_META = {
   categories = uiList(vehLib.CATEGORIES), epochs = uiList(vehLib.EPOCHS),
-  variants = uiList(vehLib.VARIANTS), sources = uiList(vehLib.SOURCES),
+  variants = uiList(vehLib.VARIANTS), sources = uiList(vehLib.SOURCES), transmissions = uiList(vehLib.TRANSMISSIONS),
 }
 
 local function journalInfo()
@@ -710,6 +868,9 @@ local function buildState()
     version = VERSION,
     level = levelName(),
     levelReady = levelData ~= nil and levelData.name == levelName(),
+    analysing = (analysis ~= nil) or nil,
+    analysisStep = analysis and analysis.step or nil,
+    startPending = startPending or nil,
     settings = settings,
     stats = stats,
     session = sessionInfo(),
@@ -722,7 +883,7 @@ local function buildState()
   }
 end
 
-local function sendState()
+sendState = function()
   guihooks.trigger('LivraisonLibreState', buildState())
 end
 
@@ -800,6 +961,7 @@ local function recordMission(result, reason)
     result = result, reason = reason,
     vehicle = info.name, brand = info.brand, model = info.model, config = info.config,
     category = CAT_LABEL[info.mainCat or 'autre'], years = info.yearsText, source = info.source,
+    transmission = info.trans and TRANS_LABEL[info.trans] or '',
     used = used, switches = m.switches,
     fromKind = S.pickup and KIND_LABEL[S.pickup.kind] or 'Ma position', fromName = fromName,
     toKind = S.dest and KIND_LABEL[S.dest.kind] or '', toName = toName,
@@ -824,6 +986,7 @@ local function recordMission(result, reason)
     vehicle = info.name or '?', from = fromName, to = toName,
     dist = S.routeDist or 0, driven = m.odo, time = perfTime(), total = S.elapsed or 0, avg = rec.avgKmh or 0,
     resets = m.resets, switches = m.switches, traffic = ts.active, level = levelName(), date = os.date('%d/%m %H:%M'),
+    maxStars = m.maxStars or 0, pursuitTime = m.pursuitTime or 0,
   })
   while #stats.history > HISTORY_MAX do table.remove(stats.history) end
   return rec
@@ -869,6 +1032,43 @@ local function flushSummary()
   end
 end
 
+-- Retour de force coupé pendant les chargements : à bas FPS (spawn, trafic, fondu), le calcul du
+-- retour de force devient instable et le volant part dans tous les sens.
+local FFB_HOLD_ON = [[
+if hydros and hydros._llFfbHold == nil then
+  hydros._llFfbHold = hydros.enableFFB and true or false
+  hydros.enableFFB = false
+  local id = hydros.getFFBID and hydros.getFFBID() or -1
+  if id and id >= 0 then
+    local send = (hydros.getForceFeedbackFunction and hydros.getForceFeedbackFunction()) or obj.sendForceFeedback
+    pcall(send, obj, id, 0, 0, 0, 0)
+  end
+end]]
+local FFB_HOLD_OFF = [[if hydros and hydros._llFfbHold ~= nil then hydros.enableFFB = hydros._llFfbHold; hydros._llFfbHold = nil end]]
+
+local function holdFFB(id)
+  if not settings.ffbGuard or not id or id < 0 then return end
+  local obj = getObjectByID(id)
+  if obj then
+    pcall(obj.queueLuaCommand, obj, FFB_HOLD_ON)
+    ffbHeld[id] = true
+  end
+end
+
+local function releaseFFB(id)
+  if not id or not ffbHeld[id] then return end
+  ffbHeld[id] = nil
+  local obj = getObjectByID(id)
+  if obj then pcall(obj.queueLuaCommand, obj, FFB_HOLD_OFF) end
+end
+
+local function releaseAllFFB()
+  local ids = {}
+  for id in pairs(ffbHeld) do ids[#ids + 1] = id end
+  for _, id in ipairs(ids) do releaseFFB(id) end
+  ffbHeld = {}
+end
+
 local function stopSession(silent)
   if S then
     flushSummary() -- pas de chargement à venir : on peut afficher le résumé en attente
@@ -877,6 +1077,8 @@ local function stopSession(silent)
     end
     trafficCtl.resetPursuit(S.vehId)
     trafficCtl.clearSirenPatches()
+    trafficCtl.resetTuning()
+    releaseAllFFB()
     if settings.traffic.mode == 'on' and settings.traffic.removeOnStop then trafficCtl.removeOwned() end
     endFade()
   end
@@ -975,6 +1177,7 @@ local function beginDriving()
     S.timeLimit = settings.timeLimit and (S.routeDist / (settings.avgSpeedKmh / 3.6) + settings.timeBonus) or nil
     S.m = newMetrics()
     S.recorded = false
+    trafficCtl.resetTuning()
     S.wanted = nil
     if settings.traffic.mode == 'on' and settings.traffic.police == 'wanted' then
       S.wanted = {timer = 2.5, tries = 0}
@@ -991,9 +1194,11 @@ local function beginDriving()
   S.phase = 'driving'
   S.plan = nil
   reserveSpot()
+  S.clearTimer = 0
   setRoute()
   createMarker()
   endFade()
+  if next(ffbHeld) then S.ffbRelease = FFB_RELEASE_DELAY end
   if S.pendingSummary then S.summaryDelay = SUMMARY_DELAY end
   S.message = nil
   if S.relaxed then S.message = 'Distance demandée introuvable : destination la plus proche choisie.' end
@@ -1039,6 +1244,7 @@ local function doSpawn()
   end
   if not veh then error('le spawn du vehicule a echoue (' .. tostring(info.model) .. ')') end
   local newId = veh:getID()
+  holdFFB(newId)
   S.vehId = newId
   S.info = info
   S.plan = plan
@@ -1083,8 +1289,12 @@ prepareNext = function(opts)
   local fromHere = opts.fromHere or (S.first and settings.firstStartHere)
   local plan, perr = planMission(info.w, info.l, fromHere)
   if not plan then toast('err', perr); stopSession(); return end
+  holdFFB(be:getPlayerVehicleID(0))
+  holdFFB(S.vehId)
+  S.ffbRelease = nil
   clearVisuals()
   S.zone = nil
+  reserveSpot(plan.dest, plan.destZone)
   S.pending = {info = info, plan = plan, fromHere = fromHere}
   S.summary = nil
   local fs = settings.fade and not fromHere and ensureExt('ui_fadeScreen')
@@ -1146,7 +1356,8 @@ local function deliver()
   local payload = summaryPayload(true, nil, records)
   queueSummary(payload)
   S.summary = {ok = true, time = time, total = S.elapsed, dist = dist, avg = avg, record = records.avg or records.fastest or false,
-               resets = payload.resets, driven = payload.driven, parkTime = payload.parkTime}
+               resets = payload.resets, driven = payload.driven, parkTime = payload.parkTime,
+               maxStars = payload.maxStars, pursuitTime = payload.pursuitTime, policeActive = payload.policeActive}
   S.phase = 'summary'
   S.phaseTimer = 0
   trafficCtl.resetPursuit(S.vehId)
@@ -1167,8 +1378,10 @@ local function failMission(reason)
   stats.failed = stats.failed + 1
   stats.streak = 0
   saveStats()
-  queueSummary(summaryPayload(false, reason))
-  S.summary = {ok = false, time = perfTime(), total = S.elapsed, reason = reason}
+  local payload = summaryPayload(false, reason)
+  queueSummary(payload)
+  S.summary = {ok = false, time = perfTime(), total = S.elapsed, reason = reason,
+               maxStars = payload.maxStars, pursuitTime = payload.pursuitTime, policeActive = payload.policeActive}
   S.phase = 'failed'
   S.phaseTimer = 0
   clearVisuals()
@@ -1329,6 +1542,7 @@ local function updateMetrics(veh, vid, dtReal, dtSim)
     -- étoiles de recherche (0 à 5)
     m.stars = trafficCtl.starsFor(trafficCtl.pursuitData(vid))
     if m.stars > m.maxStars then m.maxStars = m.stars end
+    if settings.traffic.progressive and (m.stars > 0 or m.policeSeen) then trafficCtl.tunePolice(vid, m.stars, 0.25) end
     if not m.policeSeen then
       local ts = trafficCtl.status()
       m.policeSeen = ts.police > 0 or (settings.traffic.mode == 'on' and settings.traffic.police ~= 'off')
@@ -1376,6 +1590,16 @@ local function updateDriving(dtReal, dtSim)
       S.policeClearTimer = 1
       S.wanted = nil -- pas de nouvelle recherche une fois près de l'arrivée
       trafficCtl.clearPoliceNear(vid, zone, POLICE_CLEAR_DIST * 3)
+    end
+  end
+
+  -- voiture garée ou PNJ arrêté sur la place : déplacé ailleurs (seulement quand le joueur est loin)
+  if S.zoneDist > 60 then
+    S.clearTimer = (S.clearTimer or 0) - dtReal
+    if S.clearTimer <= 0 then
+      S.clearTimer = 1
+      local n = trafficCtl.clearZone(zone, {[vid] = true, [be:getPlayerVehicleID(0)] = true})
+      if n > 0 then log('I', logTag, n .. ' véhicule(s) déplacé(s) hors de la place de livraison') end
     end
   end
 
@@ -1455,6 +1679,7 @@ end
 -- hooks
 ---------------------------------------------------------------------------
 local function onUpdate(dtReal, dtSim, dtRaw)
+  if analysis then stepAnalysis() end
   if not S then return end
   dtReal = dtReal or 0
   if S.phase == 'fading' then
@@ -1465,6 +1690,10 @@ local function onUpdate(dtReal, dtSim, dtRaw)
     local trafficOk = not S.waitTraffic or trafficCtl.isReady() or S.phaseTimer >= 25
     if S.phaseTimer >= 0.5 and trafficOk then safeCall(beginDriving, 'demarrage') end
   elseif S.phase == 'driving' then
+    if S.ffbRelease then
+      S.ffbRelease = S.ffbRelease - dtReal
+      if S.ffbRelease <= 0 then S.ffbRelease = nil; releaseAllFFB() end
+    end
     if S.pendingSummary and S.summaryDelay then
       S.summaryDelay = S.summaryDelay - dtReal
       if S.summaryDelay <= 0 then flushSummary() end
@@ -1545,17 +1774,20 @@ end
 
 local function onClientPostStartMission()
   levelData = nil
+  analysis, startPending = nil, false
+  analysisErrors = 0
   if S then stopSession(true) end
   sendState()
 end
 
 local function onClientEndMission()
   levelData = nil
+  analysis, startPending = nil, false
   if S then stopSession() end
 end
 
 local function onNavgraphReloaded()
-  if not S then levelData = nil end
+  if not S then levelData = nil; analysis = nil end
 end
 
 local function onExtensionLoaded()
@@ -1566,6 +1798,7 @@ end
 
 local function onExtensionUnloaded()
   if S and S.faded then endFade() end
+  releaseAllFFB()
   clearVisuals()
 end
 
@@ -1586,12 +1819,24 @@ local function onPursuitAction(id, action, data)
       local target = trafficCtl.STAR_SCORES[settings.traffic.wantedLevel] or 0
       if (tonumber(data.score) or 0) < target then data.score = target end
     end
+    if type(data) == 'table' then
+      local st = trafficCtl.starsFor({mode = math.max(1, tonumber(data.mode) or 0), score = data.score})
+      if st > S.m.maxStars then S.m.maxStars = st end
+      S.m.policeSeen = true
+    end
   elseif action == 'arrest' then
     S.m.arrests = S.m.arrests + 1
     if settings.traffic.arrestFails and S.phase == 'driving' then failMission('Arrêté par la police') end
   elseif action == 'evade' then
     toast('ok', 'Police semée !')
   end
+end
+
+local function onPursuitModeUpdate(id, data)
+  if not S or not S.m or id ~= S.vehId or type(data) ~= 'table' or (tonumber(data.mode) or 0) < 1 then return end
+  local st = trafficCtl.starsFor(trafficCtl.pursuitData(id) or {mode = data.mode, score = 0})
+  if st > S.m.maxStars then S.m.maxStars = st end
+  S.m.policeSeen = true
 end
 
 local function onTrafficOrParkingReady()
@@ -1605,9 +1850,9 @@ end
 function M.requestState() sendState() end
 
 function M.requestMapInfo()
-  local ld, err = buildLevel()
-  if not ld and err then toast('warn', err) end
-  sendState()
+  analyzeLevel(function(ld, err)
+    if not ld and err then toast('warn', err) end
+  end)
 end
 
 function M.setSettings(newSettings)
@@ -1639,6 +1884,7 @@ end
 
 function M.requestVehicles()
   local pool = ensurePool()
+  if pool then ensureTransmissions() end
   guihooks.trigger('LivraisonLibreVehicles', {models = pool and vehLib.modelSummaries(pool, settings.veh) or {}})
   sendState()
 end
@@ -1660,8 +1906,16 @@ function M.start()
   if S then return end
   local lvl = levelName()
   if not lvl then toast('err', 'Charge une map en freeroam pour lancer une livraison.') return end
-  local ld, err = buildLevel()
-  if not ld then toast('err', err) return end
+  if not (levelData and levelData.name == lvl) then
+    -- analyse de la map d'abord (étalée sur plusieurs images), puis lancement
+    if startPending then return end
+    startPending = true
+    analyzeLevel(function(ld, err)
+      startPending = false
+      if ld then M.start() elseif err then toast('err', err) end
+    end)
+    return
+  end
   if not ensurePool() then toast('err', 'Impossible de lire la liste des véhicules.') return end
   S = newSession()
   S.trafficPending = settings.traffic.mode ~= 'keep'
@@ -1773,9 +2027,15 @@ end
 
 -- aperçu de l'écran de résumé (pour le placer dans l'interface)
 function M.previewSummary()
+  -- image et nom du véhicule actuel du joueur si possible
+  local veh = getPlayerVehicle and getPlayerVehicle(0)
+  local okI, info = false, nil
+  if veh then okI, info = pcall(infoFromVehicle, veh) end
+  if not okI or type(info) ~= 'table' then info = nil end
   guihooks.trigger('LivraisonLibreSummary', {
-    ok = true, preview = true, count = 12, showFor = 10,
-    vehicle = 'ETK 800-Series 856x Sport', from = 'Parking', to = 'Station-service',
+    ok = true, isPreview = true, count = 12, showFor = 10,
+    preview = info and info.preview or nil,
+    vehicle = info and info.name or 'ETK 800-Series 856x Sport', from = 'Parking', to = 'Station-service',
     tripTime = 184, totalTime = 207, parkTime = 15, plannedDist = 2350, tripDist = 2290, driven = 2410,
     avgKmh = 44.8, vmaxKmh = 96, resets = 1, damage = 350, switches = 0, pursuits = 0, arrests = 0,
     records = {avg = true}, streak = 4, maxStars = 3, policeActive = true, pursuitTime = 97,
@@ -1889,6 +2149,7 @@ M.onVehicleReplaced = function(vid) if S and vid == S.vehId then vehicleChanged(
 M.onVehicleSpawned = function(vid) if S and vid == S.vehId then vehicleChanged(vid) end end
 M.trackVehReset = trackVehReset
 M.onPursuitAction = onPursuitAction
+M.onPursuitModeUpdate = onPursuitModeUpdate
 M.onTrafficOrParkingReady = onTrafficOrParkingReady
 M.onClientPostStartMission = onClientPostStartMission
 M.onClientEndMission = onClientEndMission

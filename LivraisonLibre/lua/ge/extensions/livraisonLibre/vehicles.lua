@@ -36,6 +36,12 @@ M.VARIANTS = {
   {id = 'service', label = 'Services & secours'},
 }
 
+M.TRANSMISSIONS = {
+  {id = 'both',   label = 'Les deux'},
+  {id = 'auto',   label = 'Automatique'},
+  {id = 'manual', label = 'Manuelle'},
+}
+
 M.SOURCES = {
   {id = 'officiel', label = 'Officiels BeamNG'},
   {id = 'mod',      label = 'Mods'},
@@ -127,6 +133,37 @@ local function variantOf(cfg, body)
   local b = (body or ''):lower()
   if b == 'ambulance' or b == 'armored' then return 'service' end
   return 'usine'
+end
+
+-- Boîte de vitesses : 'auto' (automatique, double embrayage, CVT, robotisée), 'manual' (manuelle,
+-- séquentielle) ou nil si inconnue. D'abord le champ "Transmission" des infos de la config...
+function M.transmissionFromText(t)
+  t = firstString(t)
+  if not t then return nil end
+  t = t:lower()
+  if t:find('seq') or t:find('manu') or t:find('stick') or t:find('h%-pattern') then return 'manual' end
+  if t:find('auto') or t:find('dct') or t:find('dual') or t:find('double') or t:find('cvt') or t:find('robot')
+    or t:find('dsg') or t:find('pdk') or t:find('smg') or t:find('amt') then return 'auto' end
+  return nil
+end
+
+-- ... sinon les pièces de la config (.pc) : "xxx_transmission_6M", "_8A", "_7DCT", "_CVT", "sequential"...
+function M.transmissionFromParts(parts)
+  if type(parts) ~= 'table' then return nil end
+  for slot, v in pairs(parts) do
+    if type(slot) == 'string' and type(v) == 'string' and v ~= '' then
+      local sl = slot:lower()
+      if sl:find('transmission') or sl:find('gearbox') or sl:find('transaxle') then
+        local p = v:lower()
+        if p:find('seq') then return 'manual' end
+        if p:find('dct') or p:find('cvt') or p:find('auto') or p:find('dsg') then return 'auto' end
+        if p:find('manual') then return 'manual' end
+        if p:find('%dm$') or p:find('_m$') or p:find('%dm_') or p:find('_m_') then return 'manual' end
+        if p:find('%da$') or p:find('_a$') or p:find('%da_') or p:find('_a_') then return 'auto' end
+      end
+    end
+  end
+  return nil
 end
 
 -- Renvoie une fiche normalisée, ou nil si ce n'est pas un véhicule pilotable.
@@ -223,6 +260,7 @@ function M.classify(cfg, model)
     ylo = ylo, yhi = yhi, yearsText = yearsText,
     w = w, l = l,
     value = tonumber(cfg.Value),
+    trans = M.transmissionFromText(cfg.Transmission),
   }
 end
 
@@ -239,15 +277,24 @@ function M.isEligible(info, vs)
   if vs.variants and not vs.variants[info.variant] then return false end
   if vs.epochs and not anyIn(info.epochs, vs.epochs) then return false end
   if vs.cats and not anyIn(info.cats, vs.cats) then return false end
+  if vs.transmission and vs.transmission ~= 'both' and info.trans ~= vs.transmission then return false end
   return true
 end
 
 -- configs : liste de configs (core_vehicles.getConfigList(true).configs), getModel(key) -> table modèle
-function M.buildPool(configs, getModel)
-  local pool = {byModel = {}, models = {}, count = 0}
+-- readPc(chemin) -> contenu du fichier .pc (facultatif) : sert à deviner la boîte quand elle n'est pas indiquée
+function M.buildPool(configs, getModel, readPc)
+  local pool = {byModel = {}, models = {}, count = 0, pcReads = 0, transInferred = readPc and true or nil}
   for _, cfg in ipairs(configs or {}) do
     local model = getModel and getModel(cfg.model_key) or nil
     local ok, info = pcall(M.classify, cfg, model)
+    if ok and info and not info.trans and readPc and info.pc then
+      pool.pcReads = pool.pcReads + 1
+      local okR, pc = pcall(readPc, info.pc)
+      if okR and type(pc) == 'table' then
+        info.trans = M.transmissionFromParts(type(pc.parts) == 'table' and pc.parts or pc)
+      end
+    end
     if ok and info then
       local m = pool.byModel[info.model]
       if not m then
@@ -266,6 +313,27 @@ function M.buildPool(configs, getModel)
     return ka < kb
   end)
   return pool
+end
+
+-- Devine la boîte des configs qui ne l'indiquent pas, en lisant leur fichier .pc (une seule fois par liste).
+-- Fait à la demande (filtre de boîte utilisé) car il faut lire plusieurs centaines de fichiers.
+function M.inferTransmissions(pool, readPc)
+  if not pool or pool.transInferred or not readPc then return 0 end
+  pool.transInferred = true
+  local n = 0
+  for _, m in ipairs(pool.models) do
+    for _, info in ipairs(m.configs) do
+      if not info.trans and info.pc then
+        n = n + 1
+        local okR, pc = pcall(readPc, info.pc)
+        if okR and type(pc) == 'table' then
+          info.trans = M.transmissionFromParts(type(pc.parts) == 'table' and pc.parts or pc)
+        end
+      end
+    end
+  end
+  pool.pcReads = (pool.pcReads or 0) + n
+  return n
 end
 
 -- Modèles éligibles avec leurs configs éligibles.
@@ -312,7 +380,7 @@ function M.modelSummaries(pool, vs)
     local eligibleCount = 0
     local cats = {}
     for _, info in ipairs(m.configs) do
-      local vsNoBlacklist = {sources = vs.sources, variants = vs.variants, epochs = vs.epochs, cats = vs.cats}
+      local vsNoBlacklist = {sources = vs.sources, variants = vs.variants, epochs = vs.epochs, cats = vs.cats, transmission = vs.transmission}
       if M.isEligible(info, vsNoBlacklist) then eligibleCount = eligibleCount + 1 end
       cats[info.mainCat] = true
     end

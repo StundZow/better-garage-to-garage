@@ -20,6 +20,9 @@ def lj(b):
     except Exception:
         return None
 
+PC_SOURCES = {}  # '/vehicles/<model>/<config>.pc' -> (zip, nom interne)
+
+
 def scan_zip(path, source):
     out_models, out_configs = {}, []
     try:
@@ -56,6 +59,7 @@ def scan_zip(path, source):
             cfg['model_key'] = m
             cfg['key'] = k
             cfg['pcFilename'] = '/vehicles/%s/%s.pc' % (m, k)
+            PC_SOURCES[cfg['pcFilename']] = (path, 'vehicles/%s/%s.pc' % (m, k))
             cfg['Configuration'] = cfg.get('Configuration', k)
             cfg['Name'] = '%s %s' % (model.get('Name', m), cfg['Configuration'])
             cfg['Source'] = source
@@ -83,13 +87,21 @@ lua_configs = L.table_from(configs, recursive=True)
 lua_models = L.table_from(models, recursive=True)
 getModel = L.eval('function(models) return function(k) return models[k] end end')(lua_models)
 t1 = time.time()
-pool = vehLib.buildPool(lua_configs, getModel)
+def read_pc(pc_path):
+    src = PC_SOURCES.get(pc_path)
+    if not src:
+        return None
+    d = lj(zipfile.ZipFile(src[0]).read(src[1]))
+    return L.table_from(d, recursive=True) if isinstance(d, dict) else None
+
+
+pool = vehLib.buildPool(lua_configs, getModel, read_pc)
 print('buildPool: %.0f ms' % ((time.time() - t1) * 1000))
 
 nmodels = len(pool.models)
-print('pilotables: %d modèles, %d configs' % (nmodels, pool.count))
+print('pilotables: %d modèles, %d configs (%d .pc lus pour deviner la boîte)' % (nmodels, pool.count, pool.pcReads))
 
-cats = collections.Counter(); epochs = collections.Counter(); variants = collections.Counter(); srcs = collections.Counter()
+cats = collections.Counter(); epochs = collections.Counter(); variants = collections.Counter(); srcs = collections.Counter(); trans = collections.Counter()
 problems = []
 excluded_keys = set(models.keys())
 for i in range(1, nmodels + 1):
@@ -101,9 +113,28 @@ for i in range(1, nmodels + 1):
         for k in info.epochs: epochs[k] += 1
         variants[info.variant] += 1
         srcs[info.srcKind] += 1
+        trans[info.trans or 'inconnue'] += 1
         mt = models[m.key].get('Type')
 for k, v in cats.most_common(): print('  cat %-12s %d' % (k, v))
-print('  epochs', dict(epochs)); print('  variants', dict(variants)); print('  sources', dict(srcs))
+print('  epochs', dict(epochs)); print('  variants', dict(variants)); print('  sources', dict(srcs)); print('  boîtes', dict(trans))
+assert trans['auto'] > 100 and trans['manual'] > 100, trans
+def trans_of(model, config):
+    m = pool.byModel[model]
+    if not m: return None
+    for j in range(1, len(m.configs) + 1):
+        if m.configs[j].config == config: return m.configs[j].trans
+    return 'absent'
+for model, config, want in [('etk800', '846x_ttsport_plus_DCT', 'auto'), ('barstow', '291a', 'auto'), ('autobello', '110a_m', 'manual')]:
+    got = trans_of(model, config)
+    print('  boîte %s/%s = %s' % (model, config, got))
+    assert got in (want, 'absent', None) and (got == want or got == 'absent'), (model, config, got)
+# filtre
+vsT = L.eval("{transmission = 'manual'}")
+elM, cM = vehLib.eligibleModels(pool, vsT)
+vsT.transmission = 'auto'
+elA, cA = vehLib.eligibleModels(pool, vsT)
+print('  filtre boîte : %d configs manuelles, %d automatiques' % (cM, cA))
+assert cM == trans['manual'] and cA == trans['auto']
 
 # aucun prop / remorque / trafic simplifié ne doit passer
 bad_types = {'prop', 'trailer', 'proptraffic', 'propparked', 'traffic'}
