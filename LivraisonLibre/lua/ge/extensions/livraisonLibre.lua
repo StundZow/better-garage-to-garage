@@ -12,7 +12,7 @@ local vehLib = require('/lua/ge/extensions/livraisonLibre/vehicles')
 local trafficCtl = require('/lua/ge/extensions/livraisonLibre/trafficCtl')
 local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 
-local VERSION = '1.3.0'
+local VERSION = '1.3.1'
 local DATA_DIR = '/settings/livraisonLibre/'
 local SETTINGS_FILE = DATA_DIR .. 'settings.json'
 local STATS_FILE = DATA_DIR .. 'stats.json'
@@ -1584,6 +1584,11 @@ local function updateDriving(dtReal, dtSim)
   S.speed = sqrt(vx * vx + vy * vy + vz * vz)
   updateMetrics(veh, vid, dtReal, dtSim)
   updateWanted(dtReal)
+  if trafficCtl.checkPoliceHit(vid) then
+    S.m.policeSeen = true
+    if S.m.maxStars < 1 then S.m.maxStars = 1 end
+    toast('warn', 'Tu as percuté la police : 1 étoile !')
+  end
   if settings.traffic.clearPoliceNearEnd and S.zoneDist < POLICE_CLEAR_DIST then
     S.policeClearTimer = (S.policeClearTimer or 0) - dtReal
     if S.policeClearTimer <= 0 then

@@ -670,6 +670,42 @@ check(lastRec().transmission == 'Manuelle', 'boîte notée dans le journal', las
 M.setSettings({veh = {transmission = 'both'}})
 check(state().vehicles.eligibleConfigs >= 3, 'les deux : tout revient', state().vehicles.eligibleConfigs)
 
+print('-- v1.3.1 : percuter une voiture de police = 1 étoile')
+M.setSettings({traffic = {mode = 'keep', police = 'off'}})
+M.start()
+frames(400)
+check(sess() and sess().phase == 'driving', 'en route (choc police)')
+local me = getPlayerVehicle(0).id
+local hitCop = env.newVeh('sedanx', '/vehicles/sedanx/police.pc', vec3(-2000, -2000, 10))
+local touch = {inArea = true, speed = 0.4, dot = 0.9}       -- simple frôlement à l'arrêt : rien
+local theirFault = {inArea = true, speed = 6, dot = -0.8}   -- la police nous rentre dedans : rien
+env.traffic.data = {
+  [me] = {isAi = false, pursuit = {mode = 0, score = 0}, collisions = {[hitCop.id] = touch}},
+  [hitCop.id] = {isAi = true, roleName = 'police', role = {name = 'police', flags = {cooldown = 1}}},
+}
+env.lastPursuitReset = nil
+frames(5)
+check(env.lastPursuitReset == nil, 'frôlement à l arrêt : pas d étoile')
+env.traffic.data[me].collisions = {[hitCop.id] = theirFault}
+frames(5)
+check(env.lastPursuitReset == nil, 'la police nous percute : pas d étoile')
+local myFault = {inArea = true, speed = 7, dot = 0.85}
+env.traffic.data[me].collisions = {[hitCop.id] = myFault}
+frames(5)
+check(env.lastPursuitReset and env.lastPursuitReset.mode == 1 and env.lastPursuitReset.vid == me, 'je percute la police : poursuite niveau 1 (1 étoile)')
+check(myFault.offense == true, 'pas de double pénalité du jeu pour le même choc')
+check(env.events.LivraisonLibreToast and env.events.LivraisonLibreToast.msg:find('percuté la police'), 'message dans l app')
+env.lastPursuitReset = nil
+frames(5)
+check(env.lastPursuitReset == nil, 'un seul déclenchement par choc')
+env.traffic.data[me].pursuit.mode = 2
+env.traffic.data[me].collisions = {[hitCop.id] = {inArea = true, speed = 9, dot = 0.9}}
+frames(5)
+check(env.lastPursuitReset == nil, 'déjà recherché : le jeu gère la suite')
+env.traffic.data = {}
+hitCop:delete()
+M.stop()
+
 print('-- analyse de la map en échec : message clair, pas d exception, pas de spam')
 M.onClientPostStartMission('/levels/testcity/main.level.json')
 local realGetMap = map.getMap

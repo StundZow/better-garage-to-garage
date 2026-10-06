@@ -75,6 +75,8 @@ Le résumé attend la fin de l'écran de chargement suivant pour s'afficher — 
 
 En mode **Recherché**, chaque livraison démarre avec le nombre d'étoiles choisi (1 à 5). Ensuite c'est le jeu qui fait monter la note : plus tu fuis longtemps et vite, et plus tu enchaînes les infractions, plus le score de poursuite grimpe. Le mod le traduit en **0 à 5 étoiles** (paliers 100 / 300 / 500 / 1200 / 2000), affichées dans le panneau et dans le résumé avec le temps passé en fuite.
 
+Percuter une voiture de police alors que tu n'es pas recherché te donne **1 étoile** d'office, même si elle ne t'avait pas encore repéré.
+
 Avec la **difficulté progressive** (activée par défaut), chaque étoile compte :
 
 | Étoiles | Comportement de la police |

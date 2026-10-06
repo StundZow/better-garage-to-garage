@@ -418,6 +418,29 @@ function M.tunePolice(playerId, stars, dt)
   end
 end
 
+-- Choc contre une voiture de police alors qu'on n'est pas recherché : 1 étoile, à coup sûr.
+-- (Le jeu ne compte ce choc que si la police t'avait déjà repéré, et pas pendant certaines de ses
+-- actions.) On reprend son critère de responsabilité : c'est toi qui avançais vers elle.
+-- Renvoie true si une poursuite vient d'être lancée.
+function M.checkPoliceHit(playerId)
+  local gt, police = _G.gameplay_traffic, _G.gameplay_police
+  if not playerId or not gt or not gt.getTrafficData or not police or not police.setPursuitMode then return false end
+  local ok, data = pcall(gt.getTrafficData)
+  if not ok or type(data) ~= 'table' then return false end
+  local me = data[playerId]
+  if type(me) ~= 'table' or type(me.collisions) ~= 'table' or type(me.pursuit) ~= 'table' then return false end
+  if (tonumber(me.pursuit.mode) or 0) ~= 0 then return false end -- déjà recherché (ou en cours d'arrestation)
+  for id, coll in pairs(me.collisions) do
+    if type(coll) == 'table' and coll.inArea and not coll.llPoliceHit and isPolice(data[id])
+      and (tonumber(coll.speed) or 0) >= 1 and (tonumber(coll.dot) or 0) >= 0.2 then
+      coll.llPoliceHit = true
+      coll.offense = true -- le jeu n'ajoute pas en plus sa propre pénalité pour ce même choc
+      if pcall(police.setPursuitMode, 1, playerId, {id}) then return true end
+    end
+  end
+  return false
+end
+
 function M.pursuitMode(vehId)
   local police = _G.gameplay_police
   if not police or not police.getPursuitData or not vehId then return 0 end
