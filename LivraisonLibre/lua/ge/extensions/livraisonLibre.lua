@@ -12,7 +12,7 @@ local vehLib = require('/lua/ge/extensions/livraisonLibre/vehicles')
 local trafficCtl = require('/lua/ge/extensions/livraisonLibre/trafficCtl')
 local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 
-local VERSION = '1.4.0'
+local VERSION = '1.5.0'
 local DATA_DIR = '/settings/livraisonLibre/'
 local SETTINGS_FILE = DATA_DIR .. 'settings.json'
 local STATS_FILE = DATA_DIR .. 'stats.json'
@@ -83,6 +83,7 @@ local DEFAULTS = {
     policeNoSiren = false,       -- secours : police sans gyrophares ni sirènes
     clearPoliceNearEnd = true,   -- à moins de 100 m de l'arrivée : police écartée, poursuite terminée
     progressive = true,          -- difficulté qui monte avec les étoiles (agressivité, barrages, renforts, police lourde)
+    npcChases = true,            -- la police poursuit aussi des PNJ suspects (événement aléatoire du trafic)
     arrestFails = true,          -- une arrestation fait rater la livraison
     removeOnStop = true,         -- retire le trafic du mod à l'arrêt des livraisons
   },
@@ -830,6 +831,7 @@ local function sessionInfo()
     to = candInfo(S.dest),
     routeDist = S.routeDist,
     timeLimit = S.timeLimit,
+    police = S.policeCtl and {mode = S.policeMode, level = settings.traffic.wantedLevel} or nil,
     summary = S.summary,
     message = S.message,
   }
@@ -977,6 +979,7 @@ local function recordMission(result, reason)
     traffic = ts.active, trafficCount = ts.amount, parkedCount = ts.parked, police = police,
     pursuits = m.pursuits, arrests = m.arrests, maxStars = m.maxStars, pursuitTime = m.pursuitTime,
     timeLimit = S.timeLimit,
+    timeLeft = (result == 'Livrée' and S.timeLimit) and max(0, S.timeLimit - perfTime()) or nil,
     locMode = settings.locMode == 'custom' and 'Mes points' or 'Aléatoire',
     surface = settings.surface == 'paved' and 'Bitume' or 'Toutes routes',
     validation = settings.validation == 'auto' and 'Auto (3 s)' or 'Frein à main',
@@ -1099,6 +1102,7 @@ local function stopSession(silent)
     trafficCtl.resetPursuit(S.vehId)
     trafficCtl.clearSirenPatches()
     trafficCtl.resetTuning()
+    trafficCtl.restorePolice()
     releaseAllFFB()
     setPoiHidden(false)
     if settings.traffic.mode == 'on' and settings.traffic.removeOnStop then trafficCtl.removeOwned() end
@@ -1201,10 +1205,15 @@ local function beginDriving()
     S.recorded = false
     trafficCtl.resetTuning()
     S.wanted = nil
-    if settings.traffic.mode == 'on' and settings.traffic.police == 'wanted' then
+    if S.policeMode == 'wanted' then
       S.wanted = {timer = 2.5, tries = 0}
     end
   end
+  -- réglage de la police depuis le panneau pendant la livraison (s'il y a des voitures de police)
+  if not S.policeCtl then
+    S.policeCtl = (settings.traffic.mode == 'on' and settings.traffic.police ~= 'off') or trafficCtl.status().police > 0
+  end
+  trafficCtl.setNpcChases(settings.traffic.npcChases)
   S.waitTraffic = false
   if S.freshTraffic then
     S.freshTraffic = false
@@ -1338,6 +1347,7 @@ local function summaryPayload(ok, reason, records)
   return {
     ok = ok, reason = reason, count = S.count, showFor = settings.summaryDuration,
     maxStars = m.maxStars or 0, policeActive = (m.policeSeen or (m.maxStars or 0) > 0) and true or false,
+    timeLeft = (ok and S.timeLimit) and max(0, S.timeLimit - perfTime()) or nil,
     pursuitTime = m.pursuitTime or 0,
     vehicle = info.name, brand = info.brand, preview = info.preview,
     from = S.pickup and readable(S.pickup.label or KIND_LABEL[S.pickup.kind]) or 'Ma position',
@@ -1379,7 +1389,8 @@ local function deliver()
   queueSummary(payload)
   S.summary = {ok = true, time = time, total = S.elapsed, dist = dist, avg = avg, record = records.avg or records.fastest or false,
                resets = payload.resets, driven = payload.driven, parkTime = payload.parkTime,
-               maxStars = payload.maxStars, pursuitTime = payload.pursuitTime, policeActive = payload.policeActive}
+               maxStars = payload.maxStars, pursuitTime = payload.pursuitTime, policeActive = payload.policeActive,
+               timeLeft = payload.timeLeft}
   S.phase = 'summary'
   S.phaseTimer = 0
   trafficCtl.resetPursuit(S.vehId)
@@ -1564,7 +1575,7 @@ local function updateMetrics(veh, vid, dtReal, dtSim)
     -- étoiles de recherche (0 à 5)
     m.stars = trafficCtl.starsFor(trafficCtl.pursuitData(vid))
     if m.stars > m.maxStars then m.maxStars = m.stars end
-    if settings.traffic.progressive and (m.stars > 0 or m.policeSeen) then trafficCtl.tunePolice(vid, m.stars, 0.25) end
+    if settings.traffic.progressive and S.policeMode ~= 'off' and (m.stars > 0 or m.policeSeen) then trafficCtl.tunePolice(vid, m.stars, 0.25) end
     if not m.policeSeen then
       local ts = trafficCtl.status()
       m.policeSeen = ts.police > 0 or (settings.traffic.mode == 'on' and settings.traffic.police ~= 'off')
@@ -1606,7 +1617,7 @@ local function updateDriving(dtReal, dtSim)
   S.speed = sqrt(vx * vx + vy * vy + vz * vz)
   updateMetrics(veh, vid, dtReal, dtSim)
   updateWanted(dtReal)
-  if trafficCtl.checkPoliceHit(vid) then
+  if S.policeMode ~= 'off' and trafficCtl.checkPoliceHit(vid) then
     S.m.policeSeen = true
     if S.m.maxStars < 1 then S.m.maxStars = 1 end
     toast('warn', 'Tu as percuté la police : 1 étoile !')
@@ -1843,7 +1854,7 @@ local function onPursuitAction(id, action, data)
   if action == 'start' then
     S.m.pursuits = S.m.pursuits + 1
     -- mode recherché : la poursuite démarre au nombre d'étoiles choisi
-    if settings.traffic.mode == 'on' and settings.traffic.police == 'wanted' and type(data) == 'table' then
+    if S.policeMode == 'wanted' and type(data) == 'table' then
       local target = trafficCtl.STAR_SCORES[settings.traffic.wantedLevel] or 0
       if (tonumber(data.score) or 0) < target then data.score = target end
     end
@@ -1891,6 +1902,28 @@ function M.setSettings(newSettings)
   settings.ui = ui -- l'état de l'interface a sa propre fonction
   sanitizeSettings(settings)
   saveSettings()
+  sendState()
+end
+
+-- Police réglée depuis le panneau pendant une livraison (et gardée pour les suivantes)
+function M.setMissionPolice(mode, level)
+  mode = oneOf(mode, {'off', 'patrol', 'wanted'}, nil)
+  if not mode then return end
+  level = floor(clamp(tonumber(level) or settings.traffic.wantedLevel or 1, 1, 5) + 0.5)
+  settings.traffic.wantedLevel = level
+  if settings.traffic.mode == 'on' then settings.traffic.police = mode end
+  saveSettings()
+  if S then
+    S.policeMode = mode
+    S.wanted = nil
+    if S.vehId and S.phase == 'driving' then
+      if not trafficCtl.setPoliceMode(S.vehId, mode, level, settings.traffic.strictness) and mode == 'wanted' then
+        S.wanted = {timer = 2, tries = 0} -- pas encore de police à portée : on réessaie
+      end
+    elseif mode == 'off' then
+      trafficCtl.setPoliceMode(S.vehId, 'off', level, settings.traffic.strictness)
+    end
+  end
   sendState()
 end
 
@@ -1947,6 +1980,8 @@ function M.start()
   if not ensurePool() then toast('err', 'Impossible de lire la liste des véhicules.') return end
   S = newSession()
   S.trafficPending = settings.traffic.mode ~= 'keep'
+  -- mode de police de la session : celui des réglages avec le trafic du mod, sinon la police du jeu telle quelle
+  S.policeMode = (settings.traffic.mode == 'on') and settings.traffic.police or 'patrol'
   if settings.hidePoi then setPoiHidden(true) end
   prepareNext({})
 end

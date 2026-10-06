@@ -1,5 +1,7 @@
 <div class="llr-root">
   <link rel="stylesheet" type="text/css" href="/ui/modules/apps/LivraisonLibreResume/app.css">
+  <!-- temps restant de la livraison (si temps limite) : juste un compte à rebours, tout en haut -->
+  <div class="llr-clock" ng-if="live.on && live.timeLeft !== null" ng-class="{'llr-clock-warn': live.timeLeft <= 30, 'llr-clock-crit': live.timeLeft <= 10}">{{ fmtClock(live.timeLeft) }}</div>
   <!-- niveau de recherche en direct pendant les livraisons : 5 étoiles, rien d'autre, seulement si recherché -->
   <div class="llr-live llr-live-hot" ng-if="live.on && live.stars > 0">
     <svg viewBox="0 0 24 24" ng-repeat="i in [1,2,3,4,5]" ng-class="{'llr-star-on': live.stars >= i}"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
@@ -31,6 +33,10 @@
         <svg viewBox="0 0 24 24"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.962 8.962 0 0012 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.120-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
         {{ fmtTime(sum.pursuitTime) }}
       </div>
+    </div>
+
+    <div class="llr-left" ng-if="sum.timeLeft !== undefined && sum.timeLeft !== null">
+      <svg viewBox="0 0 24 24"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.962 8.962 0 0012 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>Il restait {{ fmtTime(sum.timeLeft) }}
     </div>
 
     <div class="llr-line">

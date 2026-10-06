@@ -31,9 +31,9 @@ Parce qu'il tourne toujours entre les mêmes garages. Ici les destinations vienn
 - ✋ **Validation au frein à main**, ou **validation éclair** : 0,25 s après le frein à main, la livraison suivante est déjà lancée
 - 🧭 **Départ dans le sens du GPS**, peinture aléatoire, temps limite optionnel
 - ⏱️ **Perfs honnêtes** : chrono lancé à la 1re accélération et arrêté à 50 m de la zone — le stationnement est mesuré à part
-- 🚓 **Trafic et police** : sans trafic, avec trafic, patrouilles (ratio police / civils réglable) ou recherché, avec **jusqu'à 5 étoiles** qui montent tant que tu fuis — et une **difficulté qui suit les étoiles** : la police te suit à 1 étoile, te fonce dessus à partir de 3, multiplie barrages et véhicules lourds à 5
+- 🚓 **Trafic et police** : sans trafic, avec trafic, patrouilles (ratio police / civils réglable) ou recherché, avec **jusqu'à 5 étoiles** qui montent tant que tu fuis — et une **difficulté qui suit les étoiles** : la police te suit à 1 étoile, te fonce dessus à partir de 3, multiplie barrages et véhicules lourds à 5 — et tout se règle **pendant la livraison** depuis le panneau (sans police, patrouilles, ou recherché au niveau d'étoiles voulu)
 - 🔕 **Les PNJ ignorent les sirènes** pendant les livraisons — ils continuent de rouler au lieu de se ranger — et la police est écartée à moins de 100 m de l'arrivée pour te garer tranquille
-- ⭐ **Étoiles en direct** en haut de l'app « Livraison Libre - Résumé » dès que tu es recherché : 5 étoiles, remplies selon ton niveau, rien d'autre (invisible à 0 étoile)
+- ⭐ **Compte à rebours et étoiles en direct** en haut de l'app « Livraison Libre - Résumé » : le temps restant tout en haut (si le temps limite est activé), puis 5 étoiles dès que tu es recherché ; le résumé de fin indique aussi le temps qu'il te restait
 - 📊 **Écran de résumé** séparé, affiché de 3 à 15 s : image du véhicule, temps, moyenne, distance, étoiles atteintes et temps survécu en poursuite, et une 🏆 coupe quand tu bats un record
 - 🅿️ **Place toujours libre** : la place de livraison est réservée auprès du système de parking du jeu, et une voiture garée qui s'y trouverait quand même est déplacée ailleurs avant ton arrivée
 - 🎮 **Volant calme pendant les chargements** : le retour de force est coupé pendant le spawn et le chargement du trafic, puis rendu une fois l'image revenue
@@ -78,6 +78,8 @@ Le résumé attend la fin de l'écran de chargement suivant pour s'afficher — 
 En mode **Recherché**, chaque livraison démarre avec le nombre d'étoiles choisi (1 à 5). Ensuite c'est le jeu qui fait monter la note : plus tu fuis longtemps et vite, et plus tu enchaînes les infractions, plus le score de poursuite grimpe. Le mod le traduit en **0 à 5 étoiles** (paliers 100 / 300 / 500 / 1200 / 2000), affichées dans le panneau et dans le résumé avec le temps passé en fuite.
 
 Percuter une voiture de police alors que tu n'es pas recherché te donne **1 étoile** d'office, même si elle ne t'avait pas encore repéré.
+
+Tu verras parfois la police partir sirènes hurlantes alors que tu n'as aucune étoile : c'est un événement du jeu, qui désigne de temps en temps un PNJ suspect à poursuivre. L'option *Poursuites de PNJ* (Police › Plus d'options) le coupe.
 
 Avec la **difficulté progressive** (activée par défaut), chaque étoile compte :
 

@@ -728,6 +728,66 @@ M.stop()
 M.setSettings({hidePoi = true})
 gameplay_playmodeMarkers = nil
 
+print('-- v1.5 : police réglée pendant la livraison')
+M.setSettings({traffic = {mode = 'on', police = 'patrol', amount = 8, strictness = 0.5, npcChases = true}, timeLimit = false, autoNext = true, instantNext = false})
+M.start()
+frames(400)
+check(sess() and sess().phase == 'driving', 'en route (police en livraison)')
+check(sess().police and sess().police.mode == 'patrol', 'réglage de police proposé pendant la livraison', sess().police and sess().police.mode)
+check(env.policeVars.suspectFrequency == 0.5, 'poursuites de PNJ actives par défaut')
+local pv = getPlayerVehicle(0).id
+M.setMissionPolice('off')
+check(sess().police.mode == 'off' and env.policeVars.strictness == 0, 'police coupée : plus aucune infraction relevée')
+check(env.lastPursuitReset and env.lastPursuitReset.mode == 0 and env.lastPursuitReset.vid == pv, 'poursuite en cours arrêtée')
+check(env.files['/settings/livraisonLibre/settings.json'].traffic.police == 'off', 'choix gardé pour les livraisons suivantes')
+-- choc avec la police alors qu'elle est coupée : pas d'étoile
+local cop2 = env.newVeh('sedanx', '/vehicles/sedanx/police.pc', vec3(-2000, -2000, 10))
+env.traffic.data = {
+  [pv] = {isAi = false, pursuit = {mode = 0, score = 0}, collisions = {[cop2.id] = {inArea = true, speed = 8, dot = 0.9}}},
+  [cop2.id] = {isAi = true, roleName = 'police', role = {name = 'police', flags = {}}},
+}
+env.lastPursuitReset = nil
+frames(5)
+check(env.lastPursuitReset == nil, 'police coupée : un choc ne donne pas d étoile')
+env.traffic.data = {}
+cop2:delete()
+env.wantedVeh = nil
+M.setMissionPolice('wanted', 4)
+check(sess().police.mode == 'wanted' and sess().police.level == 4, 'passage en recherché, 4 étoiles', sess().police.level)
+check(env.policeVars.strictness == 0.5, 'sévérité normale rétablie')
+check(env.wantedVeh == pv and env.wantedLevel == 2, 'poursuite lancée tout de suite au bon niveau du jeu', env.wantedLevel)
+M.setMissionPolice('wanted', 5)
+check(env.wantedLevel == 3 and env.files['/settings/livraisonLibre/settings.json'].traffic.wantedLevel == 5, 'niveau changé à chaud (5 étoiles)')
+M.setMissionPolice('patrol')
+check(sess().police.mode == 'patrol' and env.lastPursuitReset.mode == 0, 'retour en patrouilles : poursuite remise à zéro')
+M.setMissionPolice('off')
+M.stop()
+check(env.policeVars.strictness == 0.5, 'sévérité d origine rendue au jeu à l arrêt', env.policeVars.strictness)
+
+print('-- v1.5 : poursuites de PNJ désactivables')
+M.setSettings({traffic = {police = 'patrol', npcChases = false}})
+M.start()
+frames(400)
+check(env.policeVars.suspectFrequency == 0, 'plus de PNJ poursuivis par la police', env.policeVars.suspectFrequency)
+M.stop()
+M.setSettings({traffic = {npcChases = true}})
+
+print('-- v1.5 : temps restant (temps limite)')
+M.setSettings({timeLimit = true, avgSpeedKmh = 45, timeBonus = 60, autoNext = false, instantNext = false, traffic = {mode = 'keep', police = 'off'}})
+M.start()
+frames(400)
+check(sess() and sess().phase == 'driving', 'en route (temps limite)')
+check(type(hud().timeLeft) == 'number' and hud().timeLeft > 0 and hud().phase == 'driving', 'compte à rebours envoyé pendant la livraison', hud().timeLeft)
+drive(300, 15)
+deliverNow()
+frames(10)
+local sumEv = env.events.LivraisonLibreSummary
+check(sumEv and sumEv.ok and type(sumEv.timeLeft) == 'number' and sumEv.timeLeft > 0, 'temps restant dans le résumé', sumEv and sumEv.timeLeft)
+check(sess().summary and sess().summary.timeLeft == sumEv.timeLeft, 'temps restant dans le bloc du panneau')
+check(type(lastRec().timeLeftS) == 'number' and lastRec().timeLeftS > 0, 'temps restant dans le journal', lastRec().timeLeftS)
+M.stop()
+M.setSettings({timeLimit = false, autoNext = true})
+
 print('-- analyse de la map en échec : message clair, pas d exception, pas de spam')
 M.onClientPostStartMission('/levels/testcity/main.level.json')
 local realGetMap = map.getMap

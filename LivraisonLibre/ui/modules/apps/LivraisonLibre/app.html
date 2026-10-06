@@ -113,6 +113,21 @@
           <div><span>Parcouru</span><b>{{ fmtDist(hud.odo) }}</b></div>
           <div><span>Resets</span><b>{{ hud.resets || 0 }}</b></div>
         </div>
+
+        <!-- police réglable sans arrêter la livraison -->
+        <div class="ll-mpolice" ng-if="sess.police && !ui.collapsed">
+          <div class="ll-seg ll-seg-small">
+            <button ng-class="{'ll-seg-on': sess.police.mode === 'off'}" ng-click="missionPolice('off')">Sans police</button>
+            <button ng-class="{'ll-seg-on': sess.police.mode === 'patrol'}" ng-click="missionPolice('patrol')">Patrouilles</button>
+            <button ng-class="{'ll-seg-on': sess.police.mode === 'wanted'}" ng-click="missionPolice('wanted')">Recherché</button>
+          </div>
+          <div class="ll-slider ll-slider-top" ng-if="sess.police.mode === 'wanted'">
+            <div class="ll-slider-head"><span>Niveau</span>
+              <span class="ll-stars ll-stars-mini"><svg viewBox="0 0 24 24" ng-repeat="i in [1,2,3,4,5]" ng-class="{'ll-star-on': ui.mStars >= i}"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></span>
+            </div>
+            <input type="range" min="1" max="5" step="1" ng-model="ui.mStars" ng-change="missionStars()">
+          </div>
+        </div>
       </div>
 
       <!-- Livraison réussie / ratée -->
@@ -126,6 +141,7 @@
           <div ng-if="sess.summary.dist"><b>{{ fmtDist(sess.summary.dist) }}</b><span>distance</span></div>
           <div><b>{{ fmtTime(sess.summary.time) }}</b><span>trajet</span></div>
           <div ng-if="sess.summary.avg"><b>{{ sess.summary.avg | number:0 }} km/h</b><span>moyenne</span></div>
+          <div ng-if="sess.summary.timeLeft !== undefined && sess.summary.timeLeft !== null"><b class="ll-good">{{ fmtTime(sess.summary.timeLeft) }}</b><span>restant</span></div>
         </div>
         <div class="ll-result-wanted" ng-if="sess.summary && (sess.summary.policeActive || sess.summary.maxStars > 0)">
           <span class="ll-stars ll-stars-mini"><svg viewBox="0 0 24 24" ng-repeat="i in [1,2,3,4,5]" ng-class="{'ll-star-on': sess.summary.maxStars >= i}"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></span>
@@ -400,6 +416,10 @@
               <div class="ll-row-title">Retirer le trafic quand j'arrête</div>
               <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.removeOnStop" ng-change="push()"><span></span></label>
             </div>
+          </div>
+          <div class="ll-row">
+            <div><div class="ll-row-title">Poursuites de PNJ</div><div class="ll-hint">La police prend parfois en chasse un PNJ suspect.</div></div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.npcChases" ng-change="push()"><span></span></label>
           </div>
           <div class="ll-row">
             <div class="ll-row-title">Les PNJ ignorent les sirènes</div>

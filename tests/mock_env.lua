@@ -357,7 +357,7 @@ gameplay_parking = {
 }
 env.pursuitMode = 0
 gameplay_police = {
-  setPursuitVars = function(v) env.policeVars = v end,
+  setPursuitVars = function(v) env.policeVars = env.policeVars or {}; for k, x in pairs(v or {}) do env.policeVars[k] = x end end,
   setupPursuitGameplay = function(vid, ids, opts)
     if (env.policeCount or 0) > 0 then env.wantedVeh = vid; env.wantedLevel = opts and opts.pursuitMode; return true end
     return false

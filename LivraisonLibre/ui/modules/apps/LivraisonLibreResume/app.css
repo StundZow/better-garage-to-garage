@@ -97,3 +97,13 @@ livraison-libre-resume { display: block; width: 100%; height: 100%; pointer-even
 .llr-live svg.llr-star-on { fill: #ffd34d; stroke: #fff3c4; filter: drop-shadow(0 0 5px rgba(255, 211, 77, 0.75)); transform: scale(1.06); }
 .llr-live-hot { animation: llr-siren 1s steps(2, start) infinite; }
 @keyframes llr-siren { 0% { border-color: rgba(229, 64, 47, 0.9); } 100% { border-color: rgba(60, 130, 255, 0.9); } }
+
+/* ---------- v1.5 : compte à rebours tout en haut (sans cadre), temps restant dans le résumé ---------- */
+.llr-clock { display: block; text-align: center; margin: 0 auto 6px; font-size: 38px; line-height: 1; font-weight: 800;
+  font-variant-numeric: tabular-nums; letter-spacing: 1px; color: #ffffff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 1); }
+.llr-clock-warn { color: #ffb347; }
+.llr-clock-crit { color: #ff4d3d; animation: llr-clock-pulse 1s ease-in-out infinite; }
+@keyframes llr-clock-pulse { 50% { transform: scale(1.08); } }
+.llr-left { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 10px; color: #45d483; font-weight: 700; font-size: 14px; }
+.llr-left svg { width: 17px; height: 17px; fill: currentColor; }

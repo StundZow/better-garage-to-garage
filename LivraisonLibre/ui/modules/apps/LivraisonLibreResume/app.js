@@ -13,7 +13,12 @@ angular.module('beamng.apps')
 
       scope.visible = false
       scope.leaving = false
-      scope.live = {on: false, stars: 0}
+      scope.live = {on: false, stars: 0, timeLeft: null}
+      scope.fmtClock = function (sec) {
+        sec = Math.max(0, Math.ceil(+sec || 0))
+        var m = Math.floor(sec / 60), s = sec % 60
+        return m + ':' + (s < 10 ? '0' : '') + s
+      }
       var liveTimer = null
       scope.sum = null
       scope.progress = 1
@@ -76,13 +81,14 @@ angular.module('beamng.apps')
           if (!data || !data.phase) return
           scope.live.on = true
           scope.live.stars = Math.max(0, Math.min(5, Math.round(+data.stars || 0)))
+          scope.live.timeLeft = (data.phase === 'driving' && typeof data.timeLeft === 'number') ? data.timeLeft : null
           if (liveTimer) $timeout.cancel(liveTimer)
-          liveTimer = $timeout(function () { scope.live.on = false; scope.live.stars = 0 }, 1500) // plus de HUD = session arrêtée
+          liveTimer = $timeout(function () { scope.live.on = false; scope.live.stars = 0; scope.live.timeLeft = null }, 1500) // plus de HUD = session arrêtée
         })
       })
       scope.$on('LivraisonLibreState', function (event, data) {
         scope.$evalAsync(function () {
-          if (data && !data.session) { scope.live.on = false; scope.live.stars = 0 }
+          if (data && !data.session) { scope.live.on = false; scope.live.stars = 0; scope.live.timeLeft = null }
         })
       })
 

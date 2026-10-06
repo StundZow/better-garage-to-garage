@@ -172,6 +172,15 @@ angular.module('beamng.apps')
         scope.push()
         api('requestVehicles')
       }
+      // police réglée pendant la livraison
+      var starsTimer = null
+      scope.missionPolice = function (mode) {
+        api('setMissionPolice', mode, +scope.ui.mStars || 1)
+      }
+      scope.missionStars = function () {
+        $timeout.cancel(starsTimer)
+        starsTimer = $timeout(function () { starsTimer = null; api('setMissionPolice', 'wanted', +scope.ui.mStars || 1) }, 350)
+      }
       scope.setTraffic = function (key, value) {
         scope.s.traffic[key] = value
         scope.push()
@@ -377,6 +386,7 @@ angular.module('beamng.apps')
           scope.st = data.stats || {}
           if (!Array.isArray(scope.st.history)) scope.st.history = []
           scope.sess = data.session || null
+          if (scope.sess && scope.sess.police && !starsTimer) scope.ui.mStars = scope.sess.police.level || 1
           if (!scope.sess) scope.hud = {}
           if (scope.vehModels.length) scope.refreshVehView()
           if (firstState) {

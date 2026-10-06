@@ -103,7 +103,9 @@ function M.apply(t, levelName)
   end
   pcall(gt.setTrafficVars, {aiMode = 'traffic', enableRandomEvents = usePolice})
   local police = ext('gameplay_police')
-  if police and police.setPursuitVars then pcall(police.setPursuitVars, {strictness = t.strictness}) end
+  if police and police.setPursuitVars then
+    pcall(police.setPursuitVars, {strictness = t.strictness, suspectFrequency = (t.npcChases ~= false) and 0.5 or 0})
+  end
   owned = true
   if tSetup or pSetup then return 'waiting' end
   ready = true
@@ -439,6 +441,46 @@ function M.checkPoliceHit(playerId)
     end
   end
   return false
+end
+
+-- Poursuites de PNJ : de temps en temps, le jeu désigne une voiture du trafic comme suspecte et la
+-- police la prend en chasse, sirènes allumées (événement aléatoire du trafic). false = jamais.
+function M.setNpcChases(on)
+  local police = _G.gameplay_police
+  if police and police.setPursuitVars then pcall(police.setPursuitVars, {suspectFrequency = on and 0.5 or 0}) end
+end
+
+-- Police réglée en pleine livraison : 'off' (la police ne réagit plus à rien), 'patrol' (seulement
+-- sur infraction), 'wanted' (recherché tout de suite au nombre d'étoiles choisi).
+-- strictness : sévérité normale à remettre ; renvoie false si la recherche n'a pas pu démarrer.
+local savedStrictness = nil
+function M.setPoliceMode(vehId, mode, level, strictness)
+  local police = _G.gameplay_police
+  if not police or not police.setPursuitVars then return false end
+  if mode == 'off' then
+    if savedStrictness == nil then
+      local ok, vars = pcall(police.getPursuitVars or function() end)
+      savedStrictness = (ok and type(vars) == 'table' and tonumber(vars.strictness)) or strictness or 0.5
+    end
+    pcall(police.setPursuitVars, {strictness = 0}) -- plus aucune infraction relevée, plus de poursuite
+    M.resetPursuit(vehId)
+    return true
+  end
+  local s = strictness or savedStrictness or 0.5
+  savedStrictness = nil
+  pcall(police.setPursuitVars, {strictness = s})
+  M.resetPursuit(vehId)
+  if mode == 'wanted' then return M.setWanted(vehId, level) end
+  return true
+end
+
+-- Fin des livraisons : sévérité d'origine si la police avait été coupée
+function M.restorePolice()
+  if savedStrictness ~= nil then
+    local police = _G.gameplay_police
+    if police and police.setPursuitVars then pcall(police.setPursuitVars, {strictness = savedStrictness}) end
+    savedStrictness = nil
+  end
 end
 
 function M.pursuitMode(vehId)

@@ -437,3 +437,8 @@ livraison-libre { display: block; width: 100%; height: 100%; }
 .ll-points-add { margin: 10px 0 8px; }
 .ll-foot-info { margin-top: 2px; }
 .ll-row-title { font-size: 13px; }
+
+/* ---------- v1.5 : police en livraison, temps restant ---------- */
+.ll-mpolice { margin-top: 10px; }
+.ll-seg-small button { font-size: 11.5px; padding: 6px 4px; }
+.ll-good { color: #45d483; }

@@ -137,7 +137,7 @@ H.scenario = function (name) {
     session = Object.assign({}, baseSession, {phase: 'driving'})
     hud = {phase: 'driving', elapsed: 74, total: 81, chronoState: 'running', distLeft: 1820, progress: 0.22, inZone: false, parkBrake: false, speedKmh: 52, validate: 0, near: false, inVehicle: true, validation: 'handbrake',
       odo: 940, avgKmh: 45.7, vmaxKmh: 88, resets: 1, damage: 420, switches: 0, pursuit: 0, stars: 0, policeOn: true, traffic: {active: true, amount: 12, parked: 6, police: 3}}
-    if (name === 'pursuit') Object.assign(hud, {pursuit: 2, stars: 3})
+    if (name === 'pursuit') { Object.assign(hud, {pursuit: 2, stars: 3, timeLeft: 83}); session.police = {mode: 'wanted', level: 3} }
     if (name === 'near') Object.assign(hud, {distLeft: 38, progress: 0.98, near: true, speedKmh: 12})
     if (name === 'inzone') Object.assign(hud, {distLeft: 1, progress: 1, near: true, inZone: true, speedKmh: 0})
     if (name === 'validating') Object.assign(hud, {distLeft: 1, progress: 1, near: true, inZone: true, speedKmh: 0, parkBrake: true, validate: 0.6})
@@ -154,7 +154,7 @@ H.summary = function (ok, preview) {
     vehicle: 'ETK 800-Series 856x Sport (M)', from: 'Parking', to: 'levels.west_coast_usa.gasStationPoints.apex.title',
     tripTime: 182, totalTime: 205, parkTime: ok ? 14 : null, plannedDist: 2340, tripDist: 2290, driven: 2410,
     avgKmh: 45.3, vmaxKmh: 96, resets: 2, damage: 1350, switches: 1, pursuits: 1, arrests: ok ? 0 : 1,
-    records: ok ? {avg: true} : [], streak: ok ? 4 : 0, maxStars: ok ? 3 : 5, policeActive: true, pursuitTime: ok ? 97 : 151})
+    records: ok ? {avg: true} : [], streak: ok ? 4 : 0, maxStars: ok ? 3 : 5, policeActive: true, pursuitTime: ok ? 97 : 151, timeLeft: ok ? 42 : null})
 }
 H.toast = function () { send('LivraisonLibreToast', {kind: 'err', msg: 'Aucune destination trouvée à cette distance. Élargis la distance min / max.'}) }
 H.calls = calls
