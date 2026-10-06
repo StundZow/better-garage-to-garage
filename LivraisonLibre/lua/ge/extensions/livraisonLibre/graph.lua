@@ -239,7 +239,8 @@ function M.sourcesFor(g, ei, t, off)
 end
 
 -- Dijkstra borné (tas binaire). Renvoie dist[nodeIndex] pour les noeuds atteints <= maxDist.
-function M.dijkstra(g, sources, maxDist)
+-- prev (facultatif) : rempli avec prev[noeud] = segment par lequel on y arrive (pour retrouver le chemin).
+function M.dijkstra(g, sources, maxDist, prev)
   maxDist = maxDist or huge
   local dist = {}
   local hn, hd, hs = {}, {}, 0
@@ -296,6 +297,7 @@ function M.dijkstra(g, sources, maxDist)
           local dv = dist[v]
           if dv == nil or nd < dv then
             dist[v] = nd
+            if prev then prev[v] = ei end
             push(v, nd)
           end
         end
@@ -303,6 +305,60 @@ function M.dijkstra(g, sources, maxDist)
     end
   end
   return dist
+end
+
+-- Trajet le plus court entre deux points attachés au graphe ({e, t} : segment et position sur ce
+-- segment). Renvoie la liste des points du trajet {x, y, z, speed, drv, r} ; chaque point porte les
+-- caractéristiques de la route qui part de lui (limitation en m/s, drivability, demi-largeur). nil si
+-- aucun chemin.
+local function edgePoint(g, e, t)
+  return g.x[e.a] + (g.x[e.b] - g.x[e.a]) * t, g.y[e.a] + (g.y[e.b] - g.y[e.a]) * t, g.z[e.a] + (g.z[e.b] - g.z[e.a]) * t
+end
+
+function M.route(g, from, to, maxDist)
+  if not g or type(from) ~= 'table' or type(to) ~= 'table' or not from.e or not to.e then return nil end
+  local ef, et = g.edges[from.e], g.edges[to.e]
+  if not ef or not et then return nil end
+  local ft, tt = from.t or 0, to.t or 0
+  local pts = {}
+  local function add(x, y, z, e)
+    pts[#pts + 1] = {x = x, y = y, z = z, speed = e and e.speed, drv = e and e.drv,
+      r = e and (g.r[e.a] + g.r[e.b]) * 0.5}
+  end
+  if from.e == to.e then
+    local x, y, z = edgePoint(g, ef, ft); add(x, y, z, ef)
+    x, y, z = edgePoint(g, et, tt); add(x, y, z, nil)
+    return pts
+  end
+  local prev = {}
+  local dist = M.dijkstra(g, M.sourcesFor(g, from.e, ft, 0), maxDist, prev)
+  local da, db = dist[et.a], dist[et.b]
+  local viaA = da and da + tt * et.len
+  local viaB = db and db + (1 - tt) * et.len
+  local endNode
+  if viaA and (not viaB or viaA <= viaB) then endNode = et.a elseif viaB then endNode = et.b else return nil end
+  -- remonte le chemin : nodes[1] = noeud d'arrivée ; le segment entre nodes[k] et nodes[k+1] est used[k]
+  local nodes, used = {endNode}, {}
+  local n, guard = endNode, 0
+  while prev[n] do
+    local ei = prev[n]
+    used[#used + 1] = ei
+    local e = g.edges[ei]
+    n = (e.a == n) and e.b or e.a
+    nodes[#nodes + 1] = n
+    guard = guard + 1
+    if guard > g.n then return nil end
+  end
+  local x, y, z = edgePoint(g, ef, ft)
+  add(x, y, z, ef)
+  for k = #nodes, 1, -1 do
+    local node = nodes[k]
+    local e = (k > 1) and g.edges[used[k - 1]] or et
+    add(g.x[node], g.y[node], g.z[node], e)
+  end
+  x, y, z = edgePoint(g, et, tt)
+  add(x, y, z, nil)
+  return pts
 end
 
 -- Distance routière d'un point attaché (ei, t, off) à partir d'une table dist.

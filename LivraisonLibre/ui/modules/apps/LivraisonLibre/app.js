@@ -181,6 +181,18 @@ angular.module('beamng.apps')
         $timeout.cancel(starsTimer)
         starsTimer = $timeout(function () { starsTimer = null; api('setMissionPolice', 'wanted', +scope.ui.mStars || 1) }, 350)
       }
+      // difficulté du temps limite (très facile -> impossible)
+      var TIME_LEVELS = ['tres_facile', 'facile', 'moyen', 'dur', 'tres_dur', 'impossible']
+      scope.timeLevelLabel = function () {
+        var list = (scope.state && scope.state.meta && scope.state.meta.timeLevels) || []
+        var id = TIME_LEVELS[+scope.ui.timeLevelIdx] || 'moyen'
+        for (var i = 0; i < list.length; i++) { if (list[i].id === id) return list[i].label }
+        return id
+      }
+      scope.setTimeLevel = function () {
+        scope.s.timeLevel = TIME_LEVELS[+scope.ui.timeLevelIdx] || 'moyen'
+        scope.pushSoon()
+      }
       scope.setTraffic = function (key, value) {
         scope.s.traffic[key] = value
         scope.push()
@@ -322,7 +334,7 @@ angular.module('beamng.apps')
         return scope.hud && scope.hud.timeLeft !== undefined && scope.hud.timeLeft !== null
       }
       scope.chronoLabel = function () {
-        if (scope.hasTimeLeft()) return 'Temps restant'
+        if (scope.hasTimeLeft()) return 'Temps restant' + (scope.sess && scope.sess.timeLevel ? ' · ' + scope.sess.timeLevel : '')
         var st = scope.hud && scope.hud.chronoState
         if (st === 'wait') return 'Chrono · accélère !'
         if (st === 'stopped') return 'Trajet terminé'
@@ -386,6 +398,7 @@ angular.module('beamng.apps')
           scope.st = data.stats || {}
           if (!Array.isArray(scope.st.history)) scope.st.history = []
           scope.sess = data.session || null
+          if (!pushPending && scope.s) scope.ui.timeLevelIdx = Math.max(0, TIME_LEVELS.indexOf(scope.s.timeLevel || 'moyen'))
           if (scope.sess && scope.sess.police && !starsTimer) scope.ui.mStars = scope.sess.police.level || 1
           if (!scope.sess) scope.hud = {}
           if (scope.vehModels.length) scope.refreshVehView()

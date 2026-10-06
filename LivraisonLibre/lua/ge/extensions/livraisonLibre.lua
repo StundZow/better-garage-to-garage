@@ -11,8 +11,9 @@ local locLib = require('/lua/ge/extensions/livraisonLibre/locations')
 local vehLib = require('/lua/ge/extensions/livraisonLibre/vehicles')
 local trafficCtl = require('/lua/ge/extensions/livraisonLibre/trafficCtl')
 local journal = require('/lua/ge/extensions/livraisonLibre/journal')
+local timing = require('/lua/ge/extensions/livraisonLibre/timing')
 
-local VERSION = '1.5.0'
+local VERSION = '1.6.0'
 local DATA_DIR = '/settings/livraisonLibre/'
 local SETTINGS_FILE = DATA_DIR .. 'settings.json'
 local STATS_FILE = DATA_DIR .. 'stats.json'
@@ -51,6 +52,7 @@ local DEFAULTS = {
   keepOwnVehicle = false,        -- garder mon véhicule de départ
   fade = true,
   timeLimit = false,
+  timeLevel = 'moyen',           -- difficulté du temps limite (très facile -> impossible)
   avgSpeedKmh = 45,
   timeBonus = 60,
   randomPaint = true,
@@ -213,6 +215,7 @@ local function sanitizeSettings(s)
   t.policeRatio = clamp(tonumber(t.policeRatio) or 0.25, 0.05, 0.75)
   s.veh.transmission = oneOf(s.veh.transmission, {'both', 'auto', 'manual'}, 'both')
   s.summaryDuration = floor(clamp(tonumber(s.summaryDuration) or 5, 3, 15) + 0.5)
+  if not timing.byId[s.timeLevel] then s.timeLevel = 'moyen' end
   s.ui.tab = OLD_TABS[s.ui.tab] or s.ui.tab
   if not UI_TABS[s.ui.tab] then s.ui.tab = 'trajet' end
   s.version = DEFAULTS.version
@@ -831,6 +834,7 @@ local function sessionInfo()
     to = candInfo(S.dest),
     routeDist = S.routeDist,
     timeLimit = S.timeLimit,
+    timeLevel = S.timeLevel and timing.byId[S.timeLevel] and timing.byId[S.timeLevel].label or nil,
     police = S.policeCtl and {mode = S.policeMode, level = settings.traffic.wantedLevel} or nil,
     summary = S.summary,
     message = S.message,
@@ -858,6 +862,7 @@ end
 local UI_META = {
   categories = uiList(vehLib.CATEGORIES), epochs = uiList(vehLib.EPOCHS),
   variants = uiList(vehLib.VARIANTS), sources = uiList(vehLib.SOURCES), transmissions = uiList(vehLib.TRANSMISSIONS),
+  timeLevels = uiList(timing.LEVELS),
 }
 
 local function journalInfo()
@@ -980,6 +985,7 @@ local function recordMission(result, reason)
     pursuits = m.pursuits, arrests = m.arrests, maxStars = m.maxStars, pursuitTime = m.pursuitTime,
     timeLimit = S.timeLimit,
     timeLeft = (result == 'Livrée' and S.timeLimit) and max(0, S.timeLimit - perfTime()) or nil,
+    timeLevel = S.timeLevel and timing.byId[S.timeLevel] and timing.byId[S.timeLevel].label or nil,
     locMode = settings.locMode == 'custom' and 'Mes points' or 'Aléatoire',
     surface = settings.surface == 'paved' and 'Bitume' or 'Toutes routes',
     validation = settings.validation == 'auto' and 'Auto (3 s)' or 'Frein à main',
@@ -1138,15 +1144,17 @@ local function planMission(w, l, fromHere)
     ctx.from = {x = px, y = py, z = pz, e = ei, t = t, off = d or 0}
   end
   local res, reason = locLib.pickMission(ctx)
+  if res then res.from = ctx.from end
   if not res and reason == 'no_destination' then
     -- tous les emplacements possibles sont occupés : on ignore l'occupation plutôt que d'échouer
     ctx.isFree = nil
     res, reason = locLib.pickMission(ctx)
+    if res then res.from = ctx.from end
   end
   if not res and not ctx.customMode and reason ~= 'need_points' then
     ctx.filter.kinds = nil
     res, reason = locLib.pickMission(ctx)
-    if res then res.kindsRelaxed = true end
+    if res then res.kindsRelaxed = true; res.from = ctx.from end
   end
   if not res then return nil, REASONS[reason] or tostring(reason) end
   return res
@@ -1182,6 +1190,23 @@ local function placeZone(dirSign)
   S.zone = zone
 end
 
+-- Temps limite de la livraison : simulation du trajet avec ce véhicule, au niveau de difficulté choisi
+local function computeTimeLimit(plan)
+  local level = settings.timeLevel
+  local from = plan.pickup or plan.from
+  local est
+  if levelData and from and from.e and plan.dest and plan.dest.e then
+    local okR, pts = pcall(graphLib.route, levelData.g, from, plan.dest)
+    if okR and pts then
+      local info = S.info or {}
+      local okE, t = pcall(timing.estimate, pts, timing.vehicleModel(info.perf, info.mainCat), level)
+      if okE and t then est = t end
+    end
+  end
+  if not est then est = timing.fallback(S.routeDist, level) end
+  return max(20, est)
+end
+
 local function beginDriving()
   local veh = S.vehId and getObjectByID(S.vehId)
   if not veh then error('vehicule introuvable apres le spawn') end
@@ -1200,7 +1225,8 @@ local function beginDriving()
     quiet = true
   else
     S.elapsed = 0
-    S.timeLimit = settings.timeLimit and (S.routeDist / (settings.avgSpeedKmh / 3.6) + settings.timeBonus) or nil
+    S.timeLimit = settings.timeLimit and computeTimeLimit(plan) or nil
+    S.timeLevel = settings.timeLimit and settings.timeLevel or nil
     S.m = newMetrics()
     S.recorded = false
     trafficCtl.resetTuning()
@@ -1348,6 +1374,7 @@ local function summaryPayload(ok, reason, records)
     ok = ok, reason = reason, count = S.count, showFor = settings.summaryDuration,
     maxStars = m.maxStars or 0, policeActive = (m.policeSeen or (m.maxStars or 0) > 0) and true or false,
     timeLeft = (ok and S.timeLimit) and max(0, S.timeLimit - perfTime()) or nil,
+    timeLevel = S.timeLevel and timing.byId[S.timeLevel] and timing.byId[S.timeLevel].label or nil,
     pursuitTime = m.pursuitTime or 0,
     vehicle = info.name, brand = info.brand, preview = info.preview,
     from = S.pickup and readable(S.pickup.label or KIND_LABEL[S.pickup.kind]) or 'Ma position',

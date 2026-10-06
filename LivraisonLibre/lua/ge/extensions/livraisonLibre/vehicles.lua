@@ -166,6 +166,15 @@ function M.transmissionFromParts(parts)
   return nil
 end
 
+-- hauteur du véhicule (m) d'après la BoundingBox de la config
+function M.heightOf(bb)
+  if type(bb) == 'table' and type(bb[1]) == 'table' and type(bb[2]) == 'table' then
+    local z1, z2 = tonumber(bb[1][3]), tonumber(bb[2][3])
+    if z1 and z2 then return math.abs(z2 - z1) end
+  end
+  return nil
+end
+
 -- Renvoie une fiche normalisée, ou nil si ce n'est pas un véhicule pilotable.
 function M.classify(cfg, model)
   if type(cfg) ~= 'table' then return nil end
@@ -261,6 +270,11 @@ function M.classify(cfg, model)
     w = w, l = l,
     value = tonumber(cfg.Value),
     trans = M.transmissionFromText(cfg.Transmission),
+    -- performances (temps limite selon la difficulté)
+    perf = {
+      top = tonumber(cfg['Top Speed']), z100 = tonumber(cfg['0-100 km/h']), power = tonumber(cfg.Power),
+      weight = tonumber(cfg.Weight), brakeG = tonumber(cfg['Braking G']), height = M.heightOf(bb),
+    },
   }
 end
 

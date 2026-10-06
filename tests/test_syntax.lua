@@ -5,6 +5,7 @@ local files = {
   '/lua/ge/extensions/livraisonLibre/vehicles.lua',
   '/lua/ge/extensions/livraisonLibre/trafficCtl.lua',
   '/lua/ge/extensions/livraisonLibre/journal.lua',
+  '/lua/ge/extensions/livraisonLibre/timing.lua',
   '/scripts/livraisonLibre/modScript.lua',
 }
 local bad = 0
@@ -24,5 +25,6 @@ end
 package.loaded['/lua/ge/extensions/livraisonLibre/graph'] = nil
 checkGlobals('/lua/ge/extensions/livraisonLibre/graph.lua')
 checkGlobals('/lua/ge/extensions/livraisonLibre/vehicles.lua')
+checkGlobals('/lua/ge/extensions/livraisonLibre/timing.lua')
 assert(bad == 0, bad .. ' fichier(s) en erreur')
 print('syntax: all good')

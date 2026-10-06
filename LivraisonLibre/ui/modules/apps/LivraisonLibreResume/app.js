@@ -5,7 +5,7 @@ angular.module('beamng.apps')
     replace: false,
     restrict: 'E',
     scope: true,
-    link: function (scope) {
+    link: function (scope, element) {
       var tick = null
       var hideTimer = null
       var translate
@@ -95,9 +95,40 @@ angular.module('beamng.apps')
       scope.$on('LivraisonLibreSummary', function (event, data) {
         scope.$evalAsync(function () { show(data || {}) })
       })
+      // Mise à l'échelle : le contenu (compte à rebours, étoiles, résumé) est réduit si besoin pour
+      // toujours tenir entièrement dans la case de l'app, quelle que soit la taille choisie.
+      var fitTimer = null
+      function fit () {
+        fitTimer = null
+        var host = element[0]
+        var inner = host.querySelector('.llr-fit')
+        if (!inner) return
+        inner.style.transform = 'none'
+        var availH = host.clientHeight, availW = host.clientWidth
+        var needH = inner.scrollHeight, needW = inner.scrollWidth
+        var k = 1
+        if (availH > 0 && needH > availH) k = Math.min(k, availH / needH)
+        if (availW > 0 && needW > availW) k = Math.min(k, availW / needW)
+        inner.style.transform = k < 0.999 ? 'scale(' + k.toFixed(3) + ')' : 'none'
+      }
+      function fitSoon () {
+        if (fitTimer) return
+        fitTimer = $timeout(fit, 0, false)
+      }
+      scope.$watchGroup(['visible', 'leaving', 'live.on', 'live.stars', 'live.timeLeft !== null', 'sum'], fitSoon)
+      var ro = null
+      if (window.ResizeObserver) {
+        ro = new window.ResizeObserver(fitSoon)
+        ro.observe(element[0])
+      }
+      window.addEventListener('resize', fitSoon)
+
       scope.$on('$destroy', function () {
         stop()
         if (liveTimer) $timeout.cancel(liveTimer)
+        if (fitTimer) $timeout.cancel(fitTimer)
+        if (ro) ro.disconnect()
+        window.removeEventListener('resize', fitSoon)
       })
     }
   }

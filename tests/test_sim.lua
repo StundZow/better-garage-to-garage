@@ -788,6 +788,29 @@ check(type(lastRec().timeLeftS) == 'number' and lastRec().timeLeftS > 0, 'temps 
 M.stop()
 M.setSettings({timeLimit = false, autoNext = true})
 
+print('-- v1.6 : temps limite selon la difficulté')
+local limits = {}
+for _, lvl in ipairs({'tres_facile', 'moyen', 'impossible'}) do
+  M.setSettings({timeLimit = true, timeLevel = lvl, autoNext = false, instantNext = false, traffic = {mode = 'keep', police = 'off'}})
+  math.randomseed(4242)
+  M.start()
+  frames(400)
+  limits[lvl] = sess() and sess().timeLimit
+  check(sess() and sess().timeLevel and type(limits[lvl]) == 'number' and limits[lvl] >= 20, 'temps limite calculé (' .. lvl .. ')', limits[lvl])
+  if lvl == 'moyen' then
+    check(sess().timeLevel == 'Moyen', 'niveau affiché pendant la livraison', sess().timeLevel)
+    drive(200, 12)
+    deliverNow()
+    frames(5)
+    check(env.events.LivraisonLibreSummary.timeLevel == 'Moyen', 'niveau dans le résumé')
+    check(lastRec().timeLevel == 'Moyen', 'niveau dans le journal', lastRec().timeLevel)
+  end
+  M.stop()
+end
+check(limits.tres_facile > limits.moyen and limits.moyen > limits.impossible, 'même livraison : moins de temps quand la difficulté monte',
+  string.format('%.0f / %.0f / %.0f s', limits.tres_facile or -1, limits.moyen or -1, limits.impossible or -1))
+M.setSettings({timeLimit = false, timeLevel = 'moyen', autoNext = true})
+
 print('-- analyse de la map en échec : message clair, pas d exception, pas de spam')
 M.onClientPostStartMission('/levels/testcity/main.level.json')
 local realGetMap = map.getMap

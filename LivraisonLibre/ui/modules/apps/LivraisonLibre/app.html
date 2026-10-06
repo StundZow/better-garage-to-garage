@@ -252,13 +252,10 @@
           </div>
           <div ng-if="s.timeLimit">
             <div class="ll-slider">
-              <div class="ll-slider-head"><span>Moyenne exigée</span><b>{{ s.avgSpeedKmh }} km/h</b></div>
-              <input type="range" min="15" max="120" step="1" ng-model="s.avgSpeedKmh" ng-change="pushSoon()">
+              <div class="ll-slider-head"><span>Difficulté</span><b>{{ timeLevelLabel() }}</b></div>
+              <input type="range" min="0" max="5" step="1" ng-model="ui.timeLevelIdx" ng-change="setTimeLevel()">
             </div>
-            <div class="ll-slider">
-              <div class="ll-slider-head"><span>Temps bonus</span><b>{{ s.timeBonus }} s</b></div>
-              <input type="range" min="0" max="300" step="5" ng-model="s.timeBonus" ng-change="pushSoon()">
-            </div>
+            <div class="ll-hint">Calculé à chaque livraison selon le véhicule (accélération, vitesse, freinage, tenue de route) et le trajet (virages, limitations, terre).</div>
           </div>
           <div class="ll-row" ng-class="{'ll-disabled': s.instantNext && s.validation === 'handbrake'}">
             <div class="ll-row-title">Enchaîner automatiquement</div>

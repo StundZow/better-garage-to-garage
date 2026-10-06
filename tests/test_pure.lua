@@ -257,6 +257,75 @@ end
 local np = 0 for _ in pairs(seenPairs) do np = np + 1 end
 check(np >= 2, 'several custom pairs used', np)
 
+print('-- temps limite selon la difficulté (timing)')
+local timing = require('/lua/ge/extensions/livraisonLibre/timing')
+-- trajets synthétiques : ligne droite rapide et route sinueuse de même longueur
+local function straight(len, speed)
+  local pts = {}
+  for i = 0, len / 50 do pts[#pts + 1] = {x = i * 50, y = 0, z = 0, speed = speed, drv = 1, r = 5} end
+  return pts
+end
+local function winding(len, speed)
+  local pts, x, y, h = {}, 0, 0, 0
+  local n = math.floor(len / 20)
+  for i = 0, n do
+    pts[#pts + 1] = {x = x, y = y, z = 0, speed = speed, drv = 1, r = 3}
+    h = h + ((math.floor(i / 6) % 2 == 0) and 0.25 or -0.25) -- virages serrés alternés
+    x, y = x + 20 * math.cos(h), y + 20 * math.sin(h)
+  end
+  return pts
+end
+local sports = timing.vehicleModel({top = 83.9, z100 = 4.9, brakeG = 1.13, height = 1.11}, 'sport')
+local sedan = timing.vehicleModel({top = 52, z100 = 10.5, brakeG = 1.05, height = 1.4}, 'berline')
+local bus = timing.vehicleModel({top = 28.5, z100 = 49.1, brakeG = 0.88, height = 3.0}, 'bus')
+local unknown = timing.vehicleModel(nil, nil)
+check(unknown.vt > 0 and unknown.A > 0 and unknown.aBrk > 0 and unknown.aLat > 0, 'véhicule sans infos : valeurs par défaut')
+check(bus.aLat < sedan.aLat and sedan.A > bus.A and sports.A > sedan.A, 'modèle cohérent (bus moins agile, sportive plus rapide)')
+local hw, tw = straight(3000, 27), winding(3000, 22)
+for _, route in ipairs({{'ligne droite', hw}, {'route sinueuse', tw}}) do
+  for _, veh in ipairs({{'sportive', sports}, {'berline', sedan}, {'bus', bus}}) do
+    local prev
+    local mono = true
+    for _, L in ipairs(timing.LEVELS) do
+      local t = timing.estimate(route[2], veh[2], L.id)
+      if not t or t <= 0 or (prev and t >= prev) then mono = false end
+      prev = t
+    end
+    check(mono, 'plus le niveau est dur, moins on a de temps (' .. route[1] .. ', ' .. veh[1] .. ')')
+  end
+end
+for _, lvl in ipairs({'facile', 'dur', 'impossible'}) do
+  check(timing.estimate(tw, sedan, lvl) > timing.estimate(hw, sedan, lvl) * 1.1, 'route sinueuse plus lente que ligne droite (' .. lvl .. ')')
+  check(timing.estimate(hw, bus, lvl) > timing.estimate(hw, sports, lvl), 'bus plus lent que sportive (' .. lvl .. ')')
+end
+local tEasy, dist = timing.estimate(hw, sedan, 'tres_facile')
+local tPro = timing.estimate(hw, sedan, 'impossible')
+local vEasy, vPro = dist / tEasy * 3.6, dist / tPro * 3.6
+check(vEasy > 20 and vEasy < 70 and vPro > 90 and vPro < 200, 'vitesses moyennes plausibles en ligne droite', string.format('%.0f / %.0f km/h', vEasy, vPro))
+check(dist > 2900 and dist < 2960, 'les 50 derniers mètres ne sont pas chronométrés', dist)
+check(timing.estimate({}, sedan, 'moyen') == nil and timing.estimate(nil, sedan, 'moyen') == nil, 'trajet invalide : nil')
+local short = timing.estimate(straight(60, 14), sedan, 'moyen')
+check(short and short > 0, 'trajet très court : temps quand même')
+check(timing.fallback(3000, 'moyen') > timing.fallback(3000, 'impossible'), 'secours sans trajet')
+
+print('-- trajet routier (graph.route)')
+local gr = graph.build((citygen.city(9, 120)))
+local spots = loc.buildRoadSpots(gr)
+local okRoutes = 0
+for i = 1, 30 do
+  local a, b = spots[(i * 7) % #spots + 1], spots[(i * 13) % #spots + 1]
+  local pts = graph.route(gr, a, b)
+  if pts then
+    local len = 0
+    for k = 1, #pts - 1 do len = len + math.sqrt((pts[k + 1].x - pts[k].x) ^ 2 + (pts[k + 1].y - pts[k].y) ^ 2 + (pts[k + 1].z - pts[k].z) ^ 2) end
+    local d = loc.candDist(gr, graph.dijkstra(gr, graph.sourcesFor(gr, a.e, a.t, 0)), b, a)
+    local startOk = math.abs(pts[1].x - a.x) < 0.01 and math.abs(pts[1].y - a.y) < 0.01
+    local endOk = math.abs(pts[#pts].x - b.x) < 0.01 and math.abs(pts[#pts].y - b.y) < 0.01
+    if startOk and endOk and d and math.abs(len - d) < 1 then okRoutes = okRoutes + 1 end
+  end
+end
+check(okRoutes == 30, 'trajet du départ à l arrivée, de la même longueur que la distance routière', okRoutes)
+
 print('-- performance (grande grille)')
 local bigNodes = citygen.city(110, 90)
 local t0 = os.clock()

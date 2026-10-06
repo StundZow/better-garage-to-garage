@@ -107,3 +107,10 @@ livraison-libre-resume { display: block; width: 100%; height: 100%; pointer-even
 @keyframes llr-clock-pulse { 50% { transform: scale(1.08); } }
 .llr-left { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 10px; color: #45d483; font-weight: 700; font-size: 14px; }
 .llr-left svg { width: 17px; height: 17px; fill: currentColor; }
+
+/* ---------- v1.6 : toujours dans la case (réduction automatique), niveau du temps ---------- */
+.llr-root { overflow: hidden; }
+.llr-fit { transform-origin: top center; }
+.llr-level { margin-left: 8px; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 700;
+  color: #cfe9da; background: rgba(69, 212, 131, 0.16); }
+

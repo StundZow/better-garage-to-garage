@@ -29,7 +29,8 @@ Parce qu'il tourne toujours entre les mêmes garages. Ici les destinations vienn
 - 🚗 **Véhicule aléatoire** parmi tous ceux installés, mods compris : filtres par catégorie, époque, variante, source et **boîte de vitesses** (auto, manuelle ou les deux), liste noire, jamais de props ni de remorques
 - 🅿️ **Zone P au sol** à 1,3× la taille du véhicule, rouge → bleue quand tu es entièrement dedans, avec un trait de 2 m au centre de la place
 - ✋ **Validation au frein à main**, ou **validation éclair** : 0,25 s après le frein à main, la livraison suivante est déjà lancée
-- 🧭 **Départ dans le sens du GPS**, peinture aléatoire, temps limite optionnel
+- 🧭 **Départ dans le sens du GPS**, peinture aléatoire
+- ⏱️ **Temps limite par difficulté**, de *Très facile* à *Impossible* : calculé à chaque livraison en simulant le trajet avec ce véhicule précis — accélération (0-100 km/h), vitesse max, freinage et tenue de route d'un côté, virages, limitations et routes en terre de l'autre. *Très facile* laisse le temps à un débutant qui respecte les limitations ; *Impossible* demande un pilote qui coupe les virages au plus vite
 - ⏱️ **Perfs honnêtes** : chrono lancé à la 1re accélération et arrêté à 50 m de la zone — le stationnement est mesuré à part
 - 🚓 **Trafic et police** : sans trafic, avec trafic, patrouilles (ratio police / civils réglable) ou recherché, avec **jusqu'à 5 étoiles** qui montent tant que tu fuis — et une **difficulté qui suit les étoiles** : la police te suit à 1 étoile, te fonce dessus à partir de 3, multiplie barrages et véhicules lourds à 5 — et tout se règle **pendant la livraison** depuis le panneau (sans police, patrouilles, ou recherché au niveau d'étoiles voulu)
 - 🔕 **Les PNJ ignorent les sirènes** pendant les livraisons — ils continuent de rouler au lieu de se ranger — et la police est écartée à moins de 100 m de l'arrivée pour te garer tranquille
@@ -72,6 +73,19 @@ Le résumé attend la fin de l'écran de chargement suivant pour s'afficher — 
 - `livraisons.csv` / `livraisons.json` — une ligne par livraison (ferme Excel pendant que tu joues, sinon le CSV ne peut pas être mis à jour)
 - `points/<map>.json` — tes points de livraison
 - `analyse.txt` — les étapes de la dernière analyse de map (utile si une map pose problème)
+
+## Temps limite
+
+Pour chaque livraison, le mod reconstitue le trajet sur le réseau routier de la map et le découpe tous les 5 m. À chaque point, il calcule la vitesse possible : limitation de la route (dépassée de plus en plus selon le niveau), virages (vitesse de passage selon l'adhérence du véhicule — un véhicule haut prend les virages moins vite — et la trajectoire : un débutant reste dans sa voie, un pilote coupe), terre. Il simule ensuite l'accélération (calée sur le 0-100 km/h et la vitesse max annoncés par la config) et les freinages avant chaque virage. Le temps obtenu, avec une marge selon le niveau, devient ton temps limite, compté comme le chrono : de la 1re accélération jusqu'à 50 m de la zone.
+
+| Niveau | Conducteur visé |
+|---|---|
+| Très facile | Débutant prudent, sous les limitations |
+| Facile | Respecte les limitations |
+| Moyen | Conduite normale, un peu au-dessus des limitations |
+| Dur | Bon conducteur, rapide |
+| Très dur | Très rapide, trajectoires coupées |
+| Impossible | Pilote : à fond partout, sans marge |
 
 ## Police, étoiles et sirènes
 
