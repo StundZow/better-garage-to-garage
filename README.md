@@ -38,23 +38,24 @@ Parce qu'il tourne toujours entre les mêmes garages. Ici les destinations vienn
 - 🅿️ **Place toujours libre** : la place de livraison est réservée auprès du système de parking du jeu, et une voiture garée qui s'y trouverait quand même est déplacée ailleurs avant ton arrivée
 - 🎮 **Volant calme pendant les chargements** : le retour de force est coupé pendant le spawn et le chargement du trafic, puis rendu une fois l'image revenue
 - 📝 **Journal de chaque livraison** en CSV (s'ouvre dans Excel) : véhicule(s), distance, vitesses, resets, dégâts, changements de véhicule, trafic, police…
-- 💾 **Tous les réglages sauvegardés** ; pendant une mission, le panneau n'affiche que la mission en cours
+- 💾 **Tous les réglages sauvegardés**, dans un panneau simple : 4 onglets, l'essentiel visible, les options avancées repliées ; pendant une mission, le panneau n'affiche que la mission en cours
+- 🗺️ **Carte dégagée** : les points d'intérêt du jeu (missions, stations, garages) disparaissent de la minimap, de la grande carte et du monde pendant les livraisons
 - 🧩 **Maps de mods** : l'analyse de la map se fait en arrière-plan, étalée sur plusieurs images — le jeu ne se fige pas, même sur une map lourde
 
 <div align="center">
-<img src="screenshots/02_trafic.png" width="260" alt="Onglet Trafic">
+<img src="screenshots/04_lieux.png" width="260" alt="Onglet Trajet">
 &nbsp;
 <img src="screenshots/03_vehicules.png" width="260" alt="Onglet Véhicules">
 &nbsp;
-<img src="screenshots/05_parametres.png" width="260" alt="Onglet Paramètres">
+<img src="screenshots/02_trafic.png" width="260" alt="Onglet Police">
 </div>
 
 ## Prise en main
 
 1. [Télécharge `LivraisonLibre.zip`](https://github.com/StundZow/better-garage-to-garage/releases/latest/download/LivraisonLibre.zip) et dépose-le **tel quel** (sans le dézipper) dans ton dossier de mods : `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\`. Fais-le jeu fermé : BeamNG recharge les mods à chaud et n'aime pas qu'on les remplace en pleine partie.
 2. Lance une map en **freeroam**.
-3. Échap → **UI Apps** → ajoute **Livraison Libre** (le panneau) et **Livraison Libre - Résumé** (l'écran de perfs), et place-les où tu veux. Onglet **Paramètres** → *Afficher un aperçu* t'aide à caser le résumé.
-4. Règle tes lieux, véhicules et trafic dans les onglets, puis clique **Lancer les livraisons**.
+3. Échap → **UI Apps** → ajoute **Livraison Libre** (le panneau) et **Livraison Libre - Résumé** (l'écran de perfs), et place-les où tu veux. Onglet **Plus** → *Aperçu* t'aide à caser le résumé.
+4. Règle l'essentiel dans les 4 onglets (**Trajet**, **Véhicules**, **Police**, **Plus**) — le reste est rangé dans « Plus d'options » — puis clique **Lancer les livraisons**.
 
 *(Raccourcis optionnels dans Options › Contrôles › Gameplay : lancer / arrêter, passer la livraison, nouvelle destination, afficher / réduire le panneau.)*
 

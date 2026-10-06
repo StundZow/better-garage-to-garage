@@ -36,7 +36,7 @@ env.playerId = own.id
 
 local M = dofile(MOD_ROOT .. '/lua/ge/extensions/livraisonLibre.lua')
 livraisonLibre = M
-local allowedGlobals = {livraisonLibre = true}
+local allowedGlobals = {livraisonLibre = true, gameplay_playmodeMarkers = true}
 setmetatable(_G, {__newindex = function(t, k, v)
   if not allowedGlobals[k] then error('écriture globale inattendue : ' .. tostring(k), 2) end
   rawset(t, k, v)
@@ -126,17 +126,22 @@ M.setSettings({summaryDuration = 99, traffic = {policeRatio = 2}})
 st = env.files['/settings/livraisonLibre/settings.json']
 check(st.summaryDuration == 15 and st.traffic.policeRatio == 0.75, 'durée du résumé et ratio police bornés', tostring(st.summaryDuration) .. ' / ' .. tostring(st.traffic.policeRatio))
 M.setSettings({summaryDuration = 5, traffic = {policeRatio = 0.25}})
-M.setUiPrefs({tab = 'stats', collapsed = true})
-check(env.files['/settings/livraisonLibre/settings.json'].ui.tab == 'stats', 'onglet mémorisé côté jeu')
+M.setUiPrefs({tab = 'plus', collapsed = true})
+check(env.files['/settings/livraisonLibre/settings.json'].ui.tab == 'plus', 'onglet mémorisé côté jeu')
+M.setUiPrefs({tab = 'stats'})
+check(env.files['/settings/livraisonLibre/settings.json'].ui.tab == 'plus', 'ancien onglet converti (stats -> plus)')
+M.setUiPrefs({tab = 'trafic'})
+check(env.files['/settings/livraisonLibre/settings.json'].ui.tab == 'police', 'ancien onglet converti (trafic -> police)')
+M.setUiPrefs({tab = 'plus', collapsed = true})
 M.setSettings({ui = {tab = 'lieux'}})
-check(env.files['/settings/livraisonLibre/settings.json'].ui.tab == 'stats', 'setSettings ne touche pas à l état de l UI')
+check(env.files['/settings/livraisonLibre/settings.json'].ui.tab == 'plus', 'setSettings ne touche pas à l état de l UI')
 -- rechargement complet : tout doit revenir
 local M2 = dofile(MOD_ROOT .. '/lua/ge/extensions/livraisonLibre.lua')
 local saveEvents = env.events.LivraisonLibreState
 M2.onExtensionLoaded()
 M2.requestState()
 local s2 = state().settings
-check(s2.minDist == 300 and s2.maxDist == 900 and s2.traffic.mode == 'on' and s2.traffic.police == 'wanted' and s2.ui.tab == 'stats', 'réglages relus après redémarrage')
+check(s2.minDist == 300 and s2.maxDist == 900 and s2.traffic.mode == 'on' and s2.traffic.police == 'wanted' and s2.ui.tab == 'plus', 'réglages relus après redémarrage')
 M.setSettings({traffic = {mode = 'keep', police = 'off', amount = 8, parked = 6}})
 
 print('-- 1re livraison')
@@ -705,6 +710,23 @@ check(env.lastPursuitReset == nil, 'déjà recherché : le jeu gère la suite')
 env.traffic.data = {}
 hitCop:delete()
 M.stop()
+
+print('-- v1.4 : points d intérêt masqués pendant les livraisons')
+gameplay_playmodeMarkers = {validPlaymodeMarkersStates = {freeroam = true, career = true}, clear = function() env.poiCleared = (env.poiCleared or 0) + 1 end}
+M.setSettings({hidePoi = true, traffic = {mode = 'keep', police = 'off'}})
+M.start()
+frames(400)
+check(sess() and next(gameplay_playmodeMarkers.validPlaymodeMarkersStates) == nil and env.poiCleared == 1, 'points d intérêt masqués pendant la livraison')
+M.skip(); frames(400)
+check(next(gameplay_playmodeMarkers.validPlaymodeMarkersStates) == nil, 'toujours masqués à la livraison suivante')
+M.stop()
+check(gameplay_playmodeMarkers.validPlaymodeMarkersStates.freeroam == true and gameplay_playmodeMarkers.validPlaymodeMarkersStates.career == true, 'rétablis à l arrêt')
+M.setSettings({hidePoi = false})
+M.start(); frames(400)
+check(gameplay_playmodeMarkers.validPlaymodeMarkersStates.freeroam == true, 'option désactivée : rien ne change')
+M.stop()
+M.setSettings({hidePoi = true})
+gameplay_playmodeMarkers = nil
 
 print('-- analyse de la map en échec : message clair, pas d exception, pas de spam')
 M.onClientPostStartMission('/levels/testcity/main.level.json')

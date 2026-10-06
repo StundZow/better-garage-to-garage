@@ -31,15 +31,9 @@
         {{ state.startPending ? 'Analyse de la map…' : 'Lancer les livraisons' }}
       </button>
       <div class="ll-start-sub">
-        <span class="ll-pill">{{ state.settings.locMode === 'custom' ? 'Mes points' : 'Aléatoire' }}</span>
-        <span class="ll-pill">{{ fmtDist(state.settings.minDist) }} – {{ fmtDist(state.settings.maxDist) }}</span>
-        <span class="ll-pill">{{ state.settings.surface === 'paved' ? 'Bitume' : 'Toutes routes' }}</span>
-        <span class="ll-pill" ng-if="state.vehicles.loaded">{{ state.vehicles.eligibleModels }} véhicules</span>
-        <span class="ll-pill" ng-if="state.settings.veh.transmission === 'auto'">Boîte auto</span>
-        <span class="ll-pill" ng-if="state.settings.veh.transmission === 'manual'">Boîte manuelle</span>
+        <span class="ll-pill">{{ state.settings.locMode === 'custom' ? 'Mes points' : (fmtDist(state.settings.minDist) + ' – ' + fmtDist(state.settings.maxDist)) }}</span>
+        <span class="ll-pill" ng-if="state.vehicles.loaded">{{ state.vehicles.eligibleModels }} véhicules{{ state.settings.veh.transmission === 'manual' ? ' · manuelle' : (state.settings.veh.transmission === 'auto' ? ' · auto' : '') }}</span>
         <span class="ll-pill">{{ trafficPill() }}</span>
-        <span class="ll-pill" ng-if="state.settings.instantNext">Validation éclair</span>
-        <span class="ll-pill" ng-if="state.settings.timeLimit">Temps limite</span>
       </div>
     </section>
 
@@ -99,7 +93,7 @@
         </div>
         <div class="ll-progress"><div class="ll-progress-bar" ng-style="{width: ((hud.progress || 0) * 100) + '%'}"></div></div>
 
-        <div class="ll-stars" ng-if="hud.policeOn" ng-class="{'ll-stars-on': hud.stars > 0}">
+        <div class="ll-stars ll-stars-on" ng-if="hud.stars > 0">
           <svg viewBox="0 0 24 24" ng-repeat="i in [1,2,3,4,5]" ng-class="{'ll-star-on': hud.stars >= i}"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
         </div>
 
@@ -115,15 +109,9 @@
         <!-- détails de la mission -->
         <div class="ll-live" ng-if="!ui.collapsed">
           <div><span>Vitesse</span><b>{{ (hud.speedKmh || 0) | number:0 }} km/h</b></div>
-          <div><span>Moyenne trajet</span><b>{{ (hud.avgKmh || 0) | number:0 }} km/h</b></div>
-          <div><span>Vitesse max</span><b>{{ (hud.vmaxKmh || 0) | number:0 }} km/h</b></div>
+          <div><span>Moyenne</span><b>{{ (hud.avgKmh || 0) | number:0 }} km/h</b></div>
           <div><span>Parcouru</span><b>{{ fmtDist(hud.odo) }}</b></div>
-          <div><span>Stationnement</span><b>{{ hud.parkTime !== undefined && hud.parkTime !== null ? fmtTime(hud.parkTime) : '–' }}</b></div>
           <div><span>Resets</span><b>{{ hud.resets || 0 }}</b></div>
-          <div><span>Dégâts</span><b>{{ fmtInt(hud.damage) }}</b></div>
-          <div><span>Changements</span><b>{{ hud.switches || 0 }}</b></div>
-          <div><span>Trafic</span><b>{{ hud.traffic && hud.traffic.active ? (hud.traffic.amount + ' véh.') : 'Non' }}</b></div>
-          <div><span>En fuite</span><b>{{ hud.pursuitTime >= 1 ? fmtTime(hud.pursuitTime) : '–' }}</b></div>
         </div>
       </div>
 
@@ -184,100 +172,10 @@
 
     <div class="ll-body" ng-if="!sess && !ui.collapsed">
 
-      <!-- ===== Mission ===== -->
-      <div ng-if="ui.tab === 'options'" class="ll-pane">
+      <!-- ===== Trajet ===== -->
+      <div ng-if="ui.tab === 'trajet'" class="ll-pane">
         <div class="ll-section">
-          <div class="ll-section-title">Validation de la livraison</div>
-          <div class="ll-seg">
-            <button ng-class="{'ll-seg-on': s.validation === 'handbrake'}" ng-click="set('validation', 'handbrake')">Frein à main</button>
-            <button ng-class="{'ll-seg-on': s.validation === 'auto'}" ng-click="set('validation', 'auto')">Auto (3 s à l'arrêt)</button>
-          </div>
-          <div class="ll-hint">La zone devient <b class="ll-blue">bleue</b> quand le véhicule est entièrement dedans. {{ s.validation === 'handbrake' ? 'Arrête-toi et serre le frein à main pour valider.' : 'Reste immobile 3 secondes pour valider.' }}</div>
-          <div class="ll-row" ng-if="s.validation === 'handbrake'">
-            <div><div class="ll-row-title">Validation éclair</div><div class="ll-hint">Validée 0,25 s après le frein à main et livraison suivante lancée directement.</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.instantNext" ng-change="push()"><span></span></label>
-          </div>
-        </div>
-
-        <div class="ll-section">
-          <div class="ll-row">
-            <div><div class="ll-row-title">Temps limite</div><div class="ll-hint">Sur le chrono du trajet (de la 1re accélération jusqu'à 50 m de la zone).</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.timeLimit" ng-change="push()"><span></span></label>
-          </div>
-          <div ng-if="s.timeLimit">
-            <div class="ll-slider">
-              <div class="ll-slider-head"><span>Vitesse moyenne exigée</span><b>{{ s.avgSpeedKmh }} km/h</b></div>
-              <input type="range" min="15" max="120" step="1" ng-model="s.avgSpeedKmh" ng-change="pushSoon()">
-            </div>
-            <div class="ll-slider">
-              <div class="ll-slider-head"><span>Temps bonus</span><b>{{ s.timeBonus }} s</b></div>
-              <input type="range" min="0" max="300" step="5" ng-model="s.timeBonus" ng-change="pushSoon()">
-            </div>
-          </div>
-        </div>
-
-        <div class="ll-section">
-          <div class="ll-row">
-            <div><div class="ll-row-title">Peinture aléatoire</div><div class="ll-hint">Pour les configurations de série.</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.randomPaint" ng-change="push()"><span></span></label>
-          </div>
-          <div class="ll-row" ng-class="{'ll-disabled': s.instantNext && s.validation === 'handbrake'}">
-            <div><div class="ll-row-title">Enchaîner automatiquement</div><div class="ll-hint">Livraison suivante quelques secondes après la validation.</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.autoNext" ng-change="push()"><span></span></label>
-          </div>
-          <div class="ll-row">
-            <div><div class="ll-row-title">1re livraison depuis ma position</div><div class="ll-hint">Sinon téléport vers un départ aléatoire.</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.firstStartHere" ng-change="push()"><span></span></label>
-          </div>
-          <div class="ll-row">
-            <div><div class="ll-row-title">Garder mon véhicule actuel</div><div class="ll-hint">Sinon il est remplacé au lancement.</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.keepOwnVehicle" ng-change="push()"><span></span></label>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- ===== Lieux ===== -->
-      <div ng-if="ui.tab === 'lieux'" class="ll-pane">
-        <div class="ll-section">
-          <div class="ll-section-title">Mode</div>
-          <div class="ll-seg">
-            <button ng-class="{'ll-seg-on': s.locMode === 'random'}" ng-click="set('locMode', 'random')">Aléatoire sur la map</button>
-            <button ng-class="{'ll-seg-on': s.locMode === 'custom'}" ng-click="set('locMode', 'custom')">Mes points ({{ state.points.length || 0 }})</button>
-          </div>
-          <div class="ll-hint" ng-if="s.locMode === 'custom'">Départs et livraisons uniquement entre tes points enregistrés (onglet Points, au moins 2).</div>
-        </div>
-
-        <div class="ll-section" ng-class="{'ll-disabled': s.locMode === 'custom'}">
-          <div class="ll-section-title">Types de lieux</div>
-          <div class="ll-chips">
-            <button class="ll-chip" ng-repeat="k in kinds" ng-class="{'ll-chip-on': s.locKinds[k.id]}" ng-click="toggleKind(k.id)">
-              {{ k.label }}<em ng-if="state.map.counts">{{ state.map.counts[k.id] || 0 }}</em>
-            </button>
-          </div>
-          <div class="ll-hint" ng-if="!state.levelReady && !state.analysing">
-            <a class="ll-link" ng-click="call('requestMapInfo')">Analyser la map</a> pour voir le nombre de lieux disponibles.
-          </div>
-          <div class="ll-hint ll-analysing" ng-if="state.analysing"><span class="ll-spin"></span>Analyse de la map en cours… <em>{{ state.analysisStep }}</em></div>
-          <div class="ll-hint" ng-if="state.levelReady && state.map.counts && (state.map.counts.parking + state.map.counts.poi + state.map.counts.home) === 0">
-            Cette map n'a pas de parkings référencés : le bord de route et les allées seront utilisés.
-          </div>
-        </div>
-
-        <div class="ll-section" ng-class="{'ll-disabled': s.locMode === 'custom'}">
-          <div class="ll-section-title">Type de route</div>
-          <div class="ll-seg">
-            <button ng-class="{'ll-seg-on': s.surface === 'paved'}" ng-click="set('surface', 'paved')">Route bitumée</button>
-            <button ng-class="{'ll-seg-on': s.surface === 'any'}" ng-click="set('surface', 'any')">Toutes routes (terre incluse)</button>
-          </div>
-          <div class="ll-row">
-            <div><div class="ll-row-title">Éviter les voies rapides</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.avoidHighways" ng-change="push()"><span></span></label>
-          </div>
-        </div>
-
-        <div class="ll-section">
-          <div class="ll-section-title">Distance de livraison (par la route)</div>
+          <div class="ll-section-title">Distance par la route</div>
           <div class="ll-slider">
             <div class="ll-slider-head"><span>Minimum</span><b>{{ fmtDist(s.minDist) }}</b></div>
             <input type="range" min="0" max="1000" step="1" ng-model="ui.minPos" ng-change="onDistSlider('min')">
@@ -289,46 +187,104 @@
         </div>
 
         <div class="ll-section">
+          <div class="ll-section-title">Destinations</div>
+          <div class="ll-seg">
+            <button ng-class="{'ll-seg-on': s.locMode === 'random'}" ng-click="set('locMode', 'random')">Aléatoires</button>
+            <button ng-class="{'ll-seg-on': s.locMode === 'custom'}" ng-click="set('locMode', 'custom')">Mes points ({{ state.points.length || 0 }})</button>
+          </div>
+          <div ng-if="s.locMode === 'random'">
+            <div class="ll-chips ll-chips-top">
+              <button class="ll-chip" ng-repeat="k in kinds" ng-class="{'ll-chip-on': s.locKinds[k.id]}" ng-click="toggleKind(k.id)">
+                {{ k.label }}<em ng-if="state.map.counts">{{ state.map.counts[k.id] || 0 }}</em>
+              </button>
+            </div>
+            <div class="ll-hint" ng-if="!state.levelReady && !state.analysing"><a class="ll-link" ng-click="call('requestMapInfo')">Analyser la map</a> pour voir combien de lieux sont disponibles.</div>
+            <div class="ll-hint ll-analysing" ng-if="state.analysing"><span class="ll-spin"></span>Analyse de la map… <em>{{ state.analysisStep }}</em></div>
+          </div>
+          <div ng-if="s.locMode === 'custom'" ng-include="'ll-points-tpl'"></div>
+        </div>
+
+        <div class="ll-section">
+          <div class="ll-section-title">Validation</div>
+          <div class="ll-seg">
+            <button ng-class="{'ll-seg-on': s.validation === 'handbrake'}" ng-click="set('validation', 'handbrake')">Frein à main</button>
+            <button ng-class="{'ll-seg-on': s.validation === 'auto'}" ng-click="set('validation', 'auto')">Arrêt 3 s</button>
+          </div>
+          <div class="ll-row" ng-if="s.validation === 'handbrake'">
+            <div><div class="ll-row-title">Validation éclair</div><div class="ll-hint">Livraison suivante dès le frein à main serré.</div></div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.instantNext" ng-change="push()"><span></span></label>
+          </div>
+        </div>
+
+        <details class="ll-more">
+          <summary>Plus d'options</summary>
+          <div class="ll-seg">
+            <button ng-class="{'ll-seg-on': s.surface === 'paved'}" ng-click="set('surface', 'paved')">Bitume</button>
+            <button ng-class="{'ll-seg-on': s.surface === 'any'}" ng-click="set('surface', 'any')">Terre incluse</button>
+          </div>
+          <div class="ll-row">
+            <div class="ll-row-title">Éviter les voies rapides</div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.avoidHighways" ng-change="push()"><span></span></label>
+          </div>
           <div class="ll-slider">
             <div class="ll-slider-head"><span>Taille de la zone P</span><b>{{ s.zoneScale | number:2 }} × le véhicule</b></div>
             <input type="range" min="1.1" max="2" step="0.05" ng-model="s.zoneScale" ng-change="pushSoon()">
           </div>
-          <details class="ll-adv">
-            <summary>Réglage avancé</summary>
+          <div class="ll-row">
+            <div class="ll-row-title">Temps limite</div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.timeLimit" ng-change="push()"><span></span></label>
+          </div>
+          <div ng-if="s.timeLimit">
             <div class="ll-slider">
-              <div class="ll-slider-head"><span>Seuil « bitume » (drivability)</span><b>{{ s.pavedThreshold | number:2 }}</b></div>
-              <input type="range" min="0.3" max="1" step="0.05" ng-model="s.pavedThreshold" ng-change="pushSoon()">
+              <div class="ll-slider-head"><span>Moyenne exigée</span><b>{{ s.avgSpeedKmh }} km/h</b></div>
+              <input type="range" min="15" max="120" step="1" ng-model="s.avgSpeedKmh" ng-change="pushSoon()">
             </div>
-            <div class="ll-hint">Les routes de terre ont une « drivability » plus faible dans BeamNG. Monte le seuil si des chemins sont encore choisis en mode bitume.</div>
-          </details>
-        </div>
+            <div class="ll-slider">
+              <div class="ll-slider-head"><span>Temps bonus</span><b>{{ s.timeBonus }} s</b></div>
+              <input type="range" min="0" max="300" step="5" ng-model="s.timeBonus" ng-change="pushSoon()">
+            </div>
+          </div>
+          <div class="ll-row" ng-class="{'ll-disabled': s.instantNext && s.validation === 'handbrake'}">
+            <div class="ll-row-title">Enchaîner automatiquement</div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.autoNext" ng-change="push()"><span></span></label>
+          </div>
+          <div class="ll-row">
+            <div class="ll-row-title">Peinture aléatoire</div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.randomPaint" ng-change="push()"><span></span></label>
+          </div>
+          <div class="ll-row">
+            <div class="ll-row-title">1re livraison depuis ma position</div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.firstStartHere" ng-change="push()"><span></span></label>
+          </div>
+          <div class="ll-row">
+            <div class="ll-row-title">Garder mon véhicule au lancement</div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.keepOwnVehicle" ng-change="push()"><span></span></label>
+          </div>
+          <div class="ll-slider">
+            <div class="ll-slider-head"><span>Seuil « bitume »</span><b>{{ s.pavedThreshold | number:2 }}</b></div>
+            <input type="range" min="0.3" max="1" step="0.05" ng-model="s.pavedThreshold" ng-change="pushSoon()">
+          </div>
+          <div ng-if="s.locMode === 'random'">
+            <div class="ll-sub-title">Mes points ({{ state.points.length || 0 }})</div>
+            <div ng-include="'ll-points-tpl'"></div>
+          </div>
+        </details>
       </div>
 
       <!-- ===== Véhicules ===== -->
       <div ng-if="ui.tab === 'vehicules'" class="ll-pane">
         <div class="ll-counter">
-          <div ng-if="state.vehicles.loaded">
-            <b>{{ state.vehicles.eligibleModels }}</b> modèles · <b>{{ state.vehicles.eligibleConfigs }}</b> configs possibles
-            <span class="ll-muted">(sur {{ state.vehicles.models }} modèles)</span>
-          </div>
-          <div ng-if="!state.vehicles.loaded" class="ll-muted">Chargement de la liste des véhicules…</div>
+          <div ng-if="state.vehicles.loaded"><b>{{ state.vehicles.eligibleModels }}</b> modèles · <b>{{ state.vehicles.eligibleConfigs }}</b> configs</div>
+          <div ng-if="!state.vehicles.loaded" class="ll-muted">Chargement des véhicules…</div>
           <div class="ll-warn" ng-if="state.vehicles.loaded && state.vehicles.eligibleModels === 0">Aucun véhicule ne correspond : élargis tes filtres.</div>
         </div>
 
         <div class="ll-section">
-          <div class="ll-section-title">Catégories</div>
+          <div class="ll-section-title">Catégories
+            <span class="ll-title-links"><a class="ll-link" ng-click="setAllVeh('cats', true)">Tout</a><a class="ll-link" ng-click="setAllVeh('cats', false)">Aucune</a></span>
+          </div>
           <div class="ll-chips">
             <button class="ll-chip" ng-repeat="c in state.meta.categories" ng-class="{'ll-chip-on': s.veh.cats[c.id]}" ng-click="toggleVeh('cats', c.id)">{{ c.label }}</button>
-          </div>
-          <div class="ll-mini-actions">
-            <a class="ll-link" ng-click="setAllVeh('cats', true)">Tout</a>
-            <a class="ll-link" ng-click="setAllVeh('cats', false)">Aucune</a>
-          </div>
-        </div>
-        <div class="ll-section">
-          <div class="ll-section-title">Époque</div>
-          <div class="ll-chips">
-            <button class="ll-chip" ng-repeat="c in state.meta.epochs" ng-class="{'ll-chip-on': s.veh.epochs[c.id]}" ng-click="toggleVeh('epochs', c.id)">{{ c.label }}</button>
           </div>
         </div>
         <div class="ll-section">
@@ -336,26 +292,26 @@
           <div class="ll-seg">
             <button ng-repeat="t in state.meta.transmissions" ng-class="{'ll-seg-on': (s.veh.transmission || 'both') === t.id}" ng-click="setVeh('transmission', t.id)">{{ t.label }}</button>
           </div>
-          <div class="ll-hint">Automatique : boîte auto, double embrayage, CVT ou robotisée. Manuelle : manuelle ou séquentielle. Les configs dont la boîte est inconnue ne sortent qu'avec « Les deux ».</div>
         </div>
-        <div class="ll-section">
-          <div class="ll-section-title">Type de configuration</div>
+
+        <details class="ll-more">
+          <summary>Plus de filtres</summary>
+          <div class="ll-sub-title">Époque</div>
+          <div class="ll-chips">
+            <button class="ll-chip" ng-repeat="c in state.meta.epochs" ng-class="{'ll-chip-on': s.veh.epochs[c.id]}" ng-click="toggleVeh('epochs', c.id)">{{ c.label }}</button>
+          </div>
+          <div class="ll-sub-title">Type de configuration</div>
           <div class="ll-chips">
             <button class="ll-chip" ng-repeat="c in state.meta.variants" ng-class="{'ll-chip-on': s.veh.variants[c.id]}" ng-click="toggleVeh('variants', c.id)">{{ c.label }}</button>
           </div>
-        </div>
-        <div class="ll-section">
-          <div class="ll-section-title">Provenance</div>
+          <div class="ll-sub-title">Provenance</div>
           <div class="ll-chips">
             <button class="ll-chip" ng-repeat="c in state.meta.sources" ng-class="{'ll-chip-on': s.veh.sources[c.id]}" ng-click="toggleVeh('sources', c.id)">{{ c.label }}</button>
           </div>
-        </div>
+        </details>
 
-        <div class="ll-section">
-          <div class="ll-section-title">
-            Liste noire
-            <span class="ll-badge" ng-if="bannedCount() > 0">{{ bannedCount() }}</span>
-          </div>
+        <details class="ll-more">
+          <summary>Liste noire<span class="ll-badge" ng-if="bannedCount() > 0">{{ bannedCount() }}</span></summary>
           <div class="ll-search">
             <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
             <input type="text" placeholder="Rechercher un modèle ou une marque…" ng-model="ui.search" ng-change="refreshVehView()">
@@ -369,34 +325,47 @@
               <div class="ll-vrow-img"><img ng-src="{{ m.preview }}" onerror="this.style.visibility='hidden'"></div>
               <div class="ll-vrow-info">
                 <div class="ll-vrow-name">{{ m.brand ? m.brand + ' ' : '' }}{{ m.name }}</div>
-                <div class="ll-vrow-sub">{{ m.configs }} config{{ m.configs > 1 ? 's' : '' }} · {{ m.eligible }} dans tes filtres · {{ srcLabel(m.srcKind) }}</div>
+                <div class="ll-vrow-sub">{{ m.eligible }} / {{ m.configs }} configs · {{ srcLabel(m.srcKind) }}</div>
               </div>
               <button class="ll-ban" ng-class="{'ll-ban-on': m.banned}" ng-click="toggleBan(m)" title="{{ m.banned ? 'Retirer de la liste noire' : 'Ajouter à la liste noire' }}">
                 <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9A7.902 7.902 0 014 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1A7.902 7.902 0 0120 12c0 4.42-3.58 8-8 8z"/></svg>
               </button>
             </div>
             <div class="ll-empty" ng-if="vehView.length === 0 && vehModels.length > 0">Aucun modèle trouvé.</div>
-            <button class="ll-btn ll-btn-ghost ll-btn-small ll-more" ng-if="vehView.length > ui.vehLimit" ng-click="ui.vehLimit = ui.vehLimit + 40">Afficher plus ({{ vehView.length - ui.vehLimit }})</button>
+            <button class="ll-btn ll-btn-ghost ll-btn-small ll-more-btn" ng-if="vehView.length > ui.vehLimit" ng-click="ui.vehLimit = ui.vehLimit + 40">Afficher plus ({{ vehView.length - ui.vehLimit }})</button>
           </div>
-        </div>
+        </details>
       </div>
 
-      <!-- ===== Trafic ===== -->
-      <div ng-if="ui.tab === 'trafic'" class="ll-pane">
+      <!-- ===== Police ===== -->
+      <div ng-if="ui.tab === 'police'" class="ll-pane">
         <div class="ll-section">
-          <div class="ll-section-title">Trafic pendant les livraisons</div>
+          <div class="ll-section-title">Trafic</div>
           <div class="ll-seg">
             <button ng-class="{'ll-seg-on': s.traffic.mode === 'keep'}" ng-click="setTraffic('mode', 'keep')">Ne pas toucher</button>
-            <button ng-class="{'ll-seg-on': s.traffic.mode === 'off'}" ng-click="setTraffic('mode', 'off')">Sans trafic</button>
+            <button ng-class="{'ll-seg-on': s.traffic.mode === 'off'}" ng-click="setTraffic('mode', 'off')">Aucun</button>
             <button ng-class="{'ll-seg-on': s.traffic.mode === 'on'}" ng-click="setTraffic('mode', 'on')">Avec trafic</button>
           </div>
-          <div class="ll-hint" ng-if="s.traffic.mode === 'keep'">Le mod garde le trafic tel qu'il est (celui que tu as lancé toi-même, ou aucun).</div>
-          <div class="ll-hint" ng-if="s.traffic.mode === 'off'">Tout le trafic et les voitures garées sont retirés au lancement des livraisons.</div>
-          <div class="ll-hint" ng-if="s.traffic.mode === 'on'">Le trafic est créé au lancement (pendant l'écran noir) et suit tes téléportations.</div>
         </div>
 
-        <div ng-if="s.traffic.mode === 'on'">
-          <div class="ll-section">
+        <div class="ll-section" ng-if="s.traffic.mode === 'on'">
+          <div class="ll-section-title">Police</div>
+          <div class="ll-seg">
+            <button ng-class="{'ll-seg-on': s.traffic.police === 'off'}" ng-click="setTraffic('police', 'off')">Aucune</button>
+            <button ng-class="{'ll-seg-on': s.traffic.police === 'patrol'}" ng-click="setTraffic('police', 'patrol')">Patrouilles</button>
+            <button ng-class="{'ll-seg-on': s.traffic.police === 'wanted'}" ng-click="setTraffic('police', 'wanted')">Recherché</button>
+          </div>
+          <div class="ll-slider ll-slider-top" ng-if="s.traffic.police === 'wanted'">
+            <div class="ll-slider-head"><span>Étoiles au départ</span>
+              <span class="ll-stars ll-stars-mini"><svg viewBox="0 0 24 24" ng-repeat="i in [1,2,3,4,5]" ng-class="{'ll-star-on': s.traffic.wantedLevel >= i}"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></span>
+            </div>
+            <input type="range" min="1" max="5" step="1" ng-model="s.traffic.wantedLevel" ng-change="pushSoon()">
+          </div>
+        </div>
+
+        <details class="ll-more">
+          <summary>Plus d'options</summary>
+          <div ng-if="s.traffic.mode === 'on'">
             <div class="ll-slider">
               <div class="ll-slider-head"><span>Véhicules en circulation</span><b>{{ s.traffic.amount }}</b></div>
               <input type="range" min="1" max="30" step="1" ng-model="s.traffic.amount" ng-change="pushSoon()">
@@ -405,18 +374,6 @@
               <div class="ll-slider-head"><span>Voitures garées</span><b>{{ s.traffic.parked }}</b></div>
               <input type="range" min="0" max="30" step="1" ng-model="s.traffic.parked" ng-change="pushSoon()">
             </div>
-            <div class="ll-hint">Plus il y a de véhicules, plus le jeu est gourmand. Les places de livraison sont réservées : aucune voiture garée ne s'y mettra.</div>
-          </div>
-
-          <div class="ll-section">
-            <div class="ll-section-title">Police</div>
-            <div class="ll-seg">
-              <button ng-class="{'ll-seg-on': s.traffic.police === 'off'}" ng-click="setTraffic('police', 'off')">Aucune</button>
-              <button ng-class="{'ll-seg-on': s.traffic.police === 'patrol'}" ng-click="setTraffic('police', 'patrol')">Patrouilles</button>
-              <button ng-class="{'ll-seg-on': s.traffic.police === 'wanted'}" ng-click="setTraffic('police', 'wanted')">Recherché</button>
-            </div>
-            <div class="ll-hint" ng-if="s.traffic.police === 'patrol'">Environ 1 véhicule sur 4 est une voiture de police. Elle te poursuit si tu commets des infractions (vitesse, feux, accidents…).</div>
-            <div class="ll-hint" ng-if="s.traffic.police === 'wanted'">À chaque livraison tu es recherché : la police te prend en chasse dès qu'elle te repère.</div>
             <div ng-if="s.traffic.police !== 'off'">
               <div class="ll-slider">
                 <div class="ll-slider-head"><span>Police / civils</span><b>{{ policeSplit() }}</b></div>
@@ -426,50 +383,32 @@
                 <div class="ll-slider-head"><span>Sévérité</span><b>{{ strictLabel(s.traffic.strictness) }}</b></div>
                 <input type="range" min="0.1" max="1" step="0.05" ng-model="s.traffic.strictness" ng-change="pushSoon()">
               </div>
-              <div class="ll-slider" ng-if="s.traffic.police === 'wanted'">
-                <div class="ll-slider-head"><span>Étoiles au départ</span>
-                  <span class="ll-stars ll-stars-mini"><svg viewBox="0 0 24 24" ng-repeat="i in [1,2,3,4,5]" ng-class="{'ll-star-on': s.traffic.wantedLevel >= i}"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></span>
-                </div>
-                <input type="range" min="1" max="5" step="1" ng-model="s.traffic.wantedLevel" ng-change="pushSoon()">
-              </div>
-              <div class="ll-hint" ng-if="s.traffic.police === 'wanted'">Plus tu fuis longtemps et vite, plus les étoiles montent (jusqu'à 5).</div>
               <div class="ll-row">
-                <div><div class="ll-row-title">Difficulté progressive</div><div class="ll-hint">1-2 étoiles : la police te suit sans foncer. 3-4 : elle te fonce dessus, renforts à 4. 5 : barrages fréquents et véhicules lourds.</div></div>
+                <div><div class="ll-row-title">Difficulté progressive</div><div class="ll-hint">Plus d'étoiles = police plus agressive, barrages, renforts.</div></div>
                 <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.progressive" ng-change="push()"><span></span></label>
               </div>
               <div class="ll-row">
-                <div><div class="ll-row-title">Écarter la police près de l'arrivée</div><div class="ll-hint">À moins de 100 m de la zone : fin de la poursuite et voitures de police envoyées plus loin, pour te garer tranquille.</div></div>
+                <div class="ll-row-title">Écarter la police près de l'arrivée</div>
                 <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.clearPoliceNearEnd" ng-change="push()"><span></span></label>
               </div>
               <div class="ll-row">
-                <div><div class="ll-row-title">Arrestation = livraison ratée</div></div>
+                <div class="ll-row-title">Arrestation = livraison ratée</div>
                 <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.arrestFails" ng-change="push()"><span></span></label>
               </div>
             </div>
-          </div>
-
-          <div class="ll-section">
             <div class="ll-row">
-              <div><div class="ll-row-title">Retirer le trafic quand j'arrête</div><div class="ll-hint">Supprime le trafic créé par le mod à la fin des livraisons.</div></div>
+              <div class="ll-row-title">Retirer le trafic quand j'arrête</div>
               <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.removeOnStop" ng-change="push()"><span></span></label>
             </div>
           </div>
-        </div>
-
-        <div class="ll-section">
-          <div class="ll-section-title">Sirènes</div>
           <div class="ll-row">
-            <div><div class="ll-row-title">Les PNJ ignorent les sirènes</div><div class="ll-hint">Pendant les livraisons, les voitures continuent de rouler au lieu de se ranger (aussi avec ton propre trafic).</div></div>
+            <div class="ll-row-title">Les PNJ ignorent les sirènes</div>
             <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.civiliansIgnoreSirens" ng-change="push()"><span></span></label>
           </div>
           <div class="ll-row">
-            <div><div class="ll-row-title">Police sans gyrophares ni sirènes</div><div class="ll-hint">Solution de secours si des PNJ s'arrêtent encore.</div></div>
+            <div class="ll-row-title">Police sans gyrophares ni sirènes</div>
             <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.policeNoSiren" ng-change="push()"><span></span></label>
           </div>
-        </div>
-
-        <div class="ll-section ll-section-flat">
-          <div class="ll-section-title">Trafic actuel</div>
           <div class="ll-traffic-now">
             <div><b>{{ state.traffic.amount || 0 }}</b><span>en circulation</span></div>
             <div><b>{{ state.traffic.parked || 0 }}</b><span>garées</span></div>
@@ -479,128 +418,28 @@
             <button class="ll-btn ll-btn-ghost ll-btn-small" ng-click="call('applyTrafficNow')" ng-disabled="s.traffic.mode === 'keep'">Appliquer maintenant</button>
             <button class="ll-btn ll-btn-ghost ll-btn-small" ng-click="call('removeTrafficNow')">Retirer tout le trafic</button>
           </div>
-        </div>
+        </details>
       </div>
 
-      <!-- ===== Points ===== -->
-      <div ng-if="ui.tab === 'points'" class="ll-pane">
-        <div class="ll-section">
-          <div class="ll-section-title">Enregistrer un point de livraison</div>
-          <div class="ll-hint">Gare ton véhicule là où tu veux la zone (dans le sens voulu), puis enregistre. Les points sont propres à chaque map.</div>
-          <div class="ll-inline">
-            <input type="text" class="ll-input" placeholder="Nom du point (optionnel)" ng-model="ui.pointName" maxlength="40">
-            <button class="ll-btn ll-btn-primary" ng-click="addPoint()" ng-disabled="!state.level">
-              <svg viewBox="0 0 24 24"><path d="M12 2C8.14 2 5 5.14 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.86-3.14-7-7-7zm4 8h-3v3h-2v-3H8V8h3V5h2v3h3v2z"/></svg>
-              Enregistrer
-            </button>
-          </div>
-        </div>
-        <div class="ll-section">
-          <div class="ll-section-title">Mes points sur cette map <span class="ll-badge">{{ state.points.length || 0 }}</span></div>
-          <div class="ll-empty" ng-if="!state.points.length">Aucun point enregistré sur cette map.</div>
-          <div class="ll-prow" ng-repeat="p in state.points track by p.id">
-            <div class="ll-prow-ico">P</div>
-            <div class="ll-prow-info" ng-if="ui.renaming !== p.id">
-              <div class="ll-prow-name">{{ p.name }}</div>
-              <div class="ll-prow-sub">à {{ fmtDist(p.dist) }}</div>
-            </div>
-            <div class="ll-prow-info" ng-if="ui.renaming === p.id">
-              <input type="text" class="ll-input ll-input-small" ng-model="ui.renameValue" maxlength="40">
-            </div>
-            <div class="ll-prow-actions">
-              <button class="ll-icon-btn" ng-if="ui.renaming === p.id" ng-click="saveRename(p)" title="Valider">
-                <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-              </button>
-              <button class="ll-icon-btn" ng-if="ui.renaming !== p.id" ng-click="startRename(p)" title="Renommer">
-                <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 000-1.41l-2.34-2.34a.996.996 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
-              </button>
-              <button class="ll-icon-btn" ng-click="callArg('routeToPoint', p.id)" title="GPS vers ce point">
-                <svg viewBox="0 0 24 24"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>
-              </button>
-              <button class="ll-icon-btn" ng-click="callArg('teleportToPoint', p.id)" title="Se téléporter">
-                <svg viewBox="0 0 24 24"><path d="M21 3L3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z"/></svg>
-              </button>
-              <button class="ll-icon-btn ll-icon-danger" ng-click="removePoint(p)" title="{{ ui.confirmDelete === p.id ? 'Cliquer encore pour supprimer' : 'Supprimer' }}" ng-class="{'ll-armed': ui.confirmDelete === p.id}">
-                <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ===== Paramètres ===== -->
-      <div ng-if="ui.tab === 'parametres'" class="ll-pane">
-        <div class="ll-section">
-          <div class="ll-section-title">Écran de résumé</div>
-          <div class="ll-hint">App séparée « Livraison Libre - Résumé » (menu UI Apps), à placer où tu veux. Elle s'affiche une fois la livraison suivante chargée.</div>
-          <div class="ll-slider">
-            <div class="ll-slider-head"><span>Durée d'affichage</span><b>{{ s.summaryDuration }} s</b></div>
-            <input type="range" min="3" max="15" step="1" ng-model="s.summaryDuration" ng-change="pushSoon()">
-          </div>
-          <button class="ll-btn ll-btn-ghost ll-btn-small" ng-click="call('previewSummary')">Afficher un aperçu (pour le placer)</button>
-        </div>
-
-        <div class="ll-section">
-          <div class="ll-section-title">Repères visuels</div>
-          <div class="ll-row">
-            <div><div class="ll-row-title">Trait au centre de la place</div><div class="ll-hint">Repère vertical de 2 m, de la couleur de la zone.</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.showCenterPost" ng-change="push()"><span></span></label>
-          </div>
-          <div class="ll-row">
-            <div><div class="ll-row-title">Colonne lumineuse</div><div class="ll-hint">Visible de loin, disparaît à l'approche.</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.showBeam" ng-change="push()"><span></span></label>
-          </div>
-          <div class="ll-row">
-            <div><div class="ll-row-title">Flèche au-dessus de la zone</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.showArrow" ng-change="push()"><span></span></label>
-          </div>
-          <div class="ll-row">
-            <div><div class="ll-row-title">Fondu au noir</div><div class="ll-hint">Pendant les téléportations.</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.fade" ng-change="push()"><span></span></label>
-          </div>
-          <div class="ll-row">
-            <div><div class="ll-row-title">Volant calme pendant les chargements</div><div class="ll-hint">Coupe le retour de force pendant le spawn et le chargement du trafic, puis le rend 1,5 s après le retour de l'image.</div></div>
-            <label class="ll-switch"><input type="checkbox" ng-model="s.ffbGuard" ng-change="push()"><span></span></label>
-          </div>
-        </div>
-
-        <div class="ll-section ll-section-flat">
-          <div class="ll-section-title">Données</div>
-          <div class="ll-hint">Réglages, stats, journal des livraisons (CSV) et points perso sont enregistrés automatiquement.</div>
-          <button class="ll-btn ll-btn-ghost ll-btn-small" ng-click="call('openDataFolder')">Ouvrir le dossier des données</button>
-          <button class="ll-btn ll-btn-ghost ll-btn-small" ng-click="confirm('resetSettings', 'Réinitialiser tous les réglages (sauf la liste noire) ?')">Réinitialiser les réglages</button>
-          <div class="ll-hint">Raccourcis clavier : Options › Contrôles › Gameplay (« Livraison Libre »).</div>
-          <div class="ll-hint">Livraison Libre v{{ state.version }}</div>
-        </div>
-      </div>
-
-      <!-- ===== Stats ===== -->
-      <div ng-if="ui.tab === 'stats'" class="ll-pane">
+      <!-- ===== Plus : stats et paramètres ===== -->
+      <div ng-if="ui.tab === 'plus'" class="ll-pane">
         <div class="ll-tiles">
           <div class="ll-tile ll-tile-accent"><b>{{ st.delivered || 0 }}</b><span>Livraisons</span></div>
-          <div class="ll-tile"><b>{{ st.failed || 0 }}</b><span>Ratées</span></div>
-          <div class="ll-tile"><b>{{ st.skipped || 0 }}</b><span>Passées</span></div>
-          <div class="ll-tile"><b>{{ fmtDist(st.distance) }}</b><span>Distance totale</span></div>
-          <div class="ll-tile"><b>{{ fmtTime(st.time) }}</b><span>Temps de trajet</span></div>
           <div class="ll-tile"><b>{{ (st.bestAvg || 0) | number:0 }} km/h</b><span>Meilleure moyenne</span></div>
           <div class="ll-tile"><b>{{ st.fastest ? fmtTime(st.fastest.time) : '–' }}</b><span>Plus rapide</span></div>
-          <div class="ll-tile"><b>{{ fmtDist(st.longest) }}</b><span>Plus longue</span></div>
-          <div class="ll-tile"><b>{{ st.bestStreak || 0 }}</b><span>Meilleure série</span></div>
-        </div>
-        <div class="ll-hint">Les perfs sont chronométrées de la 1re accélération jusqu'à 50 m de la zone (le stationnement est compté à part).</div>
-
-        <div class="ll-section">
-          <div class="ll-section-title">Journal complet <span class="ll-badge">{{ state.journal.count || 0 }}</span></div>
-          <div class="ll-hint">Chaque livraison (réussie, ratée, passée ou arrêtée) est enregistrée avec le véhicule, les distances, la vitesse moyenne et max, le temps de trajet et de stationnement, les resets, les dégâts, les changements de véhicule, le trafic et la police.</div>
-          <div class="ll-path" title="{{ state.journal.path }}">{{ state.journal.path }}</div>
-          <button class="ll-btn ll-btn-ghost ll-btn-small" ng-click="call('openDataFolder')">
-            <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-            Ouvrir le dossier
-          </button>
         </div>
 
-        <div class="ll-section">
-          <div class="ll-section-title">Dernières livraisons</div>
+        <details class="ll-more">
+          <summary>Toutes les stats</summary>
+          <div class="ll-tiles">
+            <div class="ll-tile"><b>{{ st.failed || 0 }}</b><span>Ratées</span></div>
+            <div class="ll-tile"><b>{{ st.skipped || 0 }}</b><span>Passées</span></div>
+            <div class="ll-tile"><b>{{ st.bestStreak || 0 }}</b><span>Meilleure série</span></div>
+            <div class="ll-tile"><b>{{ fmtDist(st.distance) }}</b><span>Distance totale</span></div>
+            <div class="ll-tile"><b>{{ fmtTime(st.time) }}</b><span>Temps de trajet</span></div>
+            <div class="ll-tile"><b>{{ fmtDist(st.longest) }}</b><span>Plus longue</span></div>
+          </div>
+          <div class="ll-sub-title">Dernières livraisons</div>
           <div class="ll-empty" ng-if="!st.history.length">Aucune livraison pour l'instant.</div>
           <div class="ll-hrow" ng-repeat="h in st.history">
             <div class="ll-hrow-ico" ng-class="{'ll-ok': h.ok, 'll-ko': !h.ok}">
@@ -608,18 +447,103 @@
               <svg viewBox="0 0 24 24" ng-if="!h.ok"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
             </div>
             <div class="ll-hrow-info">
-              <div class="ll-hrow-name">{{ h.vehicle }}<span class="ll-hrow-res" ng-if="h.result && !h.ok"> · {{ h.result }}{{ h.reason ? ' (' + h.reason + ')' : '' }}</span></div>
-              <div class="ll-hrow-sub">{{ tr(h.from) }} → {{ tr(h.to) }}</div>
-              <div class="ll-hrow-sub">{{ fmtDist(h.dist) }} · {{ fmtTime(h.time) }}<span ng-if="h.ok"> · {{ h.avg | number:0 }} km/h</span><span ng-if="h.resets"> · {{ h.resets }} reset{{ h.resets > 1 ? 's' : '' }}</span><span ng-if="h.traffic"> · trafic</span> · {{ h.level }} · {{ h.date }}</div>
-              <div class="ll-hrow-sub" ng-if="h.maxStars > 0"><span class="ll-stars ll-stars-mini"><svg viewBox="0 0 24 24" ng-repeat="i in [1,2,3,4,5]" ng-class="{'ll-star-on': h.maxStars >= i}"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></span><span ng-if="h.pursuitTime >= 1"> {{ fmtTime(h.pursuitTime) }} en fuite</span></div>
+              <div class="ll-hrow-name">{{ h.vehicle }}<span class="ll-hrow-res" ng-if="h.result && !h.ok"> · {{ h.result }}</span></div>
+              <div class="ll-hrow-sub">{{ fmtDist(h.dist) }} · {{ fmtTime(h.time) }}<span ng-if="h.ok"> · {{ h.avg | number:0 }} km/h</span> · {{ h.date }}
+                <span class="ll-stars ll-stars-mini" ng-if="h.maxStars > 0"><svg viewBox="0 0 24 24" ng-repeat="i in [1,2,3,4,5]" ng-class="{'ll-star-on': h.maxStars >= i}"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></span>
+              </div>
             </div>
           </div>
+          <div class="ll-inline">
+            <button class="ll-btn ll-btn-ghost ll-btn-small" ng-click="call('openDataFolder')">Journal complet (CSV)</button>
+            <button class="ll-btn ll-btn-ghost ll-btn-small" ng-click="confirm('resetStats', 'Remettre les compteurs à zéro ? (le journal complet est conservé)')">Remettre à zéro</button>
+          </div>
+        </details>
+
+        <div class="ll-section">
+          <div class="ll-section-title">Écran de résumé</div>
+          <div class="ll-slider">
+            <div class="ll-slider-head"><span>Durée d'affichage</span><b>{{ s.summaryDuration }} s</b></div>
+            <input type="range" min="3" max="15" step="1" ng-model="s.summaryDuration" ng-change="pushSoon()">
+          </div>
+          <button class="ll-btn ll-btn-ghost ll-btn-small" ng-click="call('previewSummary')">Aperçu (pour le placer)</button>
         </div>
-        <div class="ll-section ll-section-flat">
-          <button class="ll-btn ll-btn-ghost ll-btn-small" ng-click="confirm('resetStats', 'Remettre les compteurs à zéro ? (le journal complet est conservé)')">Réinitialiser les stats</button>
+
+        <details class="ll-more">
+          <summary>Affichage et confort</summary>
+          <div class="ll-row">
+            <div><div class="ll-row-title">Masquer les points d'intérêt</div><div class="ll-hint">Minimap, grande carte et marqueurs, pendant les livraisons.</div></div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.hidePoi" ng-change="push()"><span></span></label>
+          </div>
+          <div class="ll-row">
+            <div class="ll-row-title">Volant calme pendant les chargements</div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.ffbGuard" ng-change="push()"><span></span></label>
+          </div>
+          <div class="ll-row">
+            <div class="ll-row-title">Trait au centre de la place</div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.showCenterPost" ng-change="push()"><span></span></label>
+          </div>
+          <div class="ll-row">
+            <div class="ll-row-title">Colonne lumineuse</div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.showBeam" ng-change="push()"><span></span></label>
+          </div>
+          <div class="ll-row">
+            <div class="ll-row-title">Flèche au-dessus de la zone</div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.showArrow" ng-change="push()"><span></span></label>
+          </div>
+          <div class="ll-row">
+            <div class="ll-row-title">Fondu au noir</div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.fade" ng-change="push()"><span></span></label>
+          </div>
+        </details>
+
+        <div class="ll-section ll-section-flat ll-foot-info">
+          <div class="ll-inline">
+            <button class="ll-btn ll-btn-ghost ll-btn-small" ng-click="call('openDataFolder')">Dossier des données</button>
+            <button class="ll-btn ll-btn-ghost ll-btn-small" ng-click="confirm('resetSettings', 'Réinitialiser tous les réglages (sauf la liste noire) ?')">Réinitialiser les réglages</button>
+          </div>
+          <div class="ll-hint">Livraison Libre v{{ state.version }} · raccourcis : Options › Contrôles › Gameplay</div>
         </div>
       </div>
     </div>
+
+    <!-- Mes points (utilisé dans l'onglet Trajet) -->
+    <script type="text/ng-template" id="ll-points-tpl">
+      <div class="ll-inline ll-points-add">
+        <input type="text" class="ll-input" placeholder="Nom du point (optionnel)" ng-model="ui.pointName" maxlength="40">
+        <button class="ll-btn ll-btn-primary" ng-click="addPoint()" ng-disabled="!state.level" title="Gare-toi là où tu veux la zone, dans le bon sens, puis enregistre">
+          <svg viewBox="0 0 24 24"><path d="M12 2C8.14 2 5 5.14 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.86-3.14-7-7-7zm4 8h-3v3h-2v-3H8V8h3V5h2v3h3v2z"/></svg>
+          Ici
+        </button>
+      </div>
+      <div class="ll-empty" ng-if="!state.points.length">Gare-toi là où tu veux une zone de livraison, puis « Ici ». Il en faut au moins 2.</div>
+      <div class="ll-prow" ng-repeat="p in state.points track by p.id">
+        <div class="ll-prow-ico">P</div>
+        <div class="ll-prow-info" ng-if="ui.renaming !== p.id">
+          <div class="ll-prow-name">{{ p.name }}</div>
+          <div class="ll-prow-sub">à {{ fmtDist(p.dist) }}</div>
+        </div>
+        <div class="ll-prow-info" ng-if="ui.renaming === p.id">
+          <input type="text" class="ll-input ll-input-small" ng-model="ui.renameValue" maxlength="40">
+        </div>
+        <div class="ll-prow-actions">
+          <button class="ll-icon-btn" ng-if="ui.renaming === p.id" ng-click="saveRename(p)" title="Valider">
+            <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+          </button>
+          <button class="ll-icon-btn" ng-if="ui.renaming !== p.id" ng-click="startRename(p)" title="Renommer">
+            <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 000-1.41l-2.34-2.34a.996.996 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+          </button>
+          <button class="ll-icon-btn" ng-click="callArg('routeToPoint', p.id)" title="GPS vers ce point">
+            <svg viewBox="0 0 24 24"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>
+          </button>
+          <button class="ll-icon-btn" ng-click="callArg('teleportToPoint', p.id)" title="Se téléporter">
+            <svg viewBox="0 0 24 24"><path d="M21 3L3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z"/></svg>
+          </button>
+          <button class="ll-icon-btn ll-icon-danger" ng-click="removePoint(p)" title="{{ ui.confirmDelete === p.id ? 'Cliquer encore pour supprimer' : 'Supprimer' }}" ng-class="{'ll-armed': ui.confirmDelete === p.id}">
+            <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+          </button>
+        </div>
+      </div>
+    </script>
   </div>
 
   <div class="ll-toast" ng-if="ui.toast" ng-class="'ll-toast-' + ui.toast.kind" ng-click="ui.toast = null">{{ ui.toast.msg }}</div>

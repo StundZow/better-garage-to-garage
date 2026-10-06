@@ -32,14 +32,17 @@ angular.module('beamng.apps')
 
       var saved = loadUi()
       scope.tabs = [
-        { id: 'options', label: 'Mission', icon: 'M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z' },
-        { id: 'lieux', label: 'Lieux', icon: 'M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z' },
+        { id: 'trajet', label: 'Trajet', icon: 'M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z' },
         { id: 'vehicules', label: 'Véhicules', icon: 'M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z' },
-        { id: 'trafic', label: 'Trafic', icon: 'M20 10h-3V8.86c1.72-.45 3-2 3-3.86h-3V4c0-.55-.45-1-1-1H8c-.55 0-1 .45-1 1v1H4c0 1.86 1.28 3.41 3 3.86V10H4c0 1.86 1.28 3.41 3 3.86V15H4c0 1.86 1.28 3.41 3 3.86V20c0 .55.45 1 1 1h8c.55 0 1-.45 1-1v-1.14c1.72-.45 3-2 3-3.86h-3v-1.14c1.72-.45 3-2 3-3.86zm-8 9c-1.11 0-2-.9-2-2s.89-2 2-2c1.1 0 2 .9 2 2s-.89 2-2 2zm0-5c-1.11 0-2-.9-2-2s.89-2 2-2c1.1 0 2 .9 2 2s-.89 2-2 2zm0-5c-1.11 0-2-.9-2-2 0-1.11.89-2 2-2 1.1 0 2 .89 2 2 0 1.1-.89 2-2 2z' },
-        { id: 'points', label: 'Points', icon: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z' },
-        { id: 'stats', label: 'Stats', icon: 'M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z' },
-        { id: 'parametres', label: 'Paramètres', icon: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z' }
+        { id: 'police', label: 'Police', icon: 'M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 6l1.18 2.41 2.65.38-1.92 1.87.45 2.64L12 13.05l-2.36 1.25.45-2.64-1.92-1.87 2.65-.38L12 7z' },
+        { id: 'plus', label: 'Plus', icon: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z' }
       ]
+      // anciens onglets (avant la 1.4) -> nouveaux
+      var OLD_TABS = { options: 'trajet', lieux: 'trajet', points: 'trajet', trafic: 'police', stats: 'plus', parametres: 'plus' }
+      function normTab (t) {
+        t = OLD_TABS[t] || t
+        return scope.tabs.some(function (x) { return x.id === t }) ? t : 'trajet'
+      }
       scope.kinds = [
         { id: 'road', label: 'Bord de route' },
         { id: 'parking', label: 'Parkings' },
@@ -47,7 +50,7 @@ angular.module('beamng.apps')
         { id: 'home', label: 'Maisons & allées' }
       ]
       scope.ui = {
-        tab: saved.tab || 'options', collapsed: !!saved.collapsed,
+        tab: normTab(saved.tab), collapsed: !!saved.collapsed,
         search: '', onlyBanned: false, vehLimit: 40,
         pointName: '', renaming: null, renameValue: '', confirmDelete: null,
         toast: null, confirm: null, minPos: 0, maxPos: 0
@@ -194,10 +197,9 @@ angular.module('beamng.apps')
         onTab(id)
       }
       function onTab (id, auto) {
+        // (l'analyse de la map ne se lance que sur le lien « Analyser la map » ou au lancement)
         if (id === 'vehicules') api('requestVehicles')
-        // l'analyse de la map ne se lance que sur un clic (jamais automatiquement à l'ouverture)
-        if (id === 'lieux' && !auto && scope.state && scope.state.level && !scope.state.levelReady && !scope.state.analysing) api('requestMapInfo')
-        if (id === 'points' || id === 'trafic' || id === 'stats') api('requestState')
+        else api('requestState')
       }
 
       scope.confirm = function (fn, text) { scope.ui.confirm = { fn: fn, text: text } }
@@ -381,7 +383,7 @@ angular.module('beamng.apps')
             firstState = false
             var uiPrefs = data.settings && data.settings.ui
             if (uiPrefs && !Array.isArray(uiPrefs)) {
-              if (uiPrefs.tab) scope.ui.tab = uiPrefs.tab
+              if (uiPrefs.tab) scope.ui.tab = normTab(uiPrefs.tab)
               if (uiPrefs.collapsed !== undefined) scope.ui.collapsed = !!uiPrefs.collapsed
             }
             if (!scope.ui.collapsed && !scope.sess) onTab(scope.ui.tab, true)

@@ -1,6 +1,6 @@
 """Banc de test de l'interface (sans le jeu) : python tests/ui/server.py puis http://localhost:8791
 Paramètres d'URL : ?view=app|resume|both  &scenario=idle|far|near|inzone|validating|pursuit|summary|failed|lost
-                   &tab=mission|lieux|v|trafic|points|stats|param  &summary=ok|ko
+                   &tab=trajet|v|police|plus  &open=1 (déplie les options)  &summary=ok|ko
 """
 import http.server
 import os

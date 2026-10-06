@@ -285,7 +285,7 @@ livraison-libre { display: block; width: 100%; height: 100%; }
 .ll-ban { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--ll-line); background: transparent; color: var(--ll-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
 .ll-ban:hover { color: #ff8b7f; border-color: rgba(229, 64, 47, 0.5); }
 .ll-ban-on { color: #fff; background: var(--ll-red); border-color: var(--ll-red); }
-.ll-more { margin-top: 4px; align-self: center; }
+.ll-more-btn { margin-top: 4px; align-self: center; }
 
 /* points */
 .ll-prow { display: flex; align-items: center; gap: 9px; padding: 6px; border-radius: 9px; background: var(--ll-bg2); margin-top: 5px; }
@@ -414,3 +414,26 @@ livraison-libre { display: block; width: 100%; height: 100%; }
 .ll-analysing em { font-style: normal; opacity: 0.7; margin-left: 4px; }
 .ll-hrow-sub .ll-stars-mini svg { width: 12px; height: 12px; }
 .ll-tag-alt { background: rgba(120, 170, 255, 0.14); color: #a9c8ff; }
+
+/* ---------- v1.4 : menus simplifiés ---------- */
+.ll-tabs { padding: 6px 8px 0; gap: 4px; }
+.ll-tab { font-size: 11.5px; letter-spacing: 0; padding: 7px 2px 8px; }
+.ll-tab svg { width: 19px; height: 19px; }
+.ll-more { margin: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.ll-pane > .ll-more:last-child { border-bottom: 0; }
+.ll-more > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 11px 0 9px; cursor: pointer; outline: none;
+  color: var(--ll-muted); font-size: 12px; font-weight: 700; letter-spacing: 0.3px; }
+.ll-more > summary::-webkit-details-marker { display: none; }
+.ll-more > summary::before { content: ''; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg); transition: transform 0.15s; margin-right: 2px; }
+.ll-more[open] > summary::before { transform: rotate(45deg); }
+.ll-more > summary:hover { color: var(--ll-text); }
+.ll-more[open] { padding-bottom: 8px; }
+.ll-more .ll-badge { margin-left: 2px; }
+.ll-sub-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--ll-muted); margin: 12px 0 7px; }
+.ll-title-links { margin-left: auto; display: inline-flex; gap: 12px; text-transform: none; letter-spacing: 0; font-weight: 600; }
+.ll-chips-top { margin-top: 10px; }
+.ll-slider-top { margin-top: 12px; }
+.ll-points-add { margin: 10px 0 8px; }
+.ll-foot-info { margin-top: 2px; }
+.ll-row-title { font-size: 13px; }

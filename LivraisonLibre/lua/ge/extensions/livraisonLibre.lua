@@ -12,7 +12,7 @@ local vehLib = require('/lua/ge/extensions/livraisonLibre/vehicles')
 local trafficCtl = require('/lua/ge/extensions/livraisonLibre/trafficCtl')
 local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 
-local VERSION = '1.3.3'
+local VERSION = '1.4.0'
 local DATA_DIR = '/settings/livraisonLibre/'
 local SETTINGS_FILE = DATA_DIR .. 'settings.json'
 local STATS_FILE = DATA_DIR .. 'stats.json'
@@ -61,6 +61,7 @@ local DEFAULTS = {
   showBeam = true,               -- colonne lumineuse visible de loin
   showArrow = true,              -- flèche flottante au-dessus de la zone
   ffbGuard = true,               -- coupe le retour de force du volant pendant les chargements
+  hidePoi = true,                -- masque les points d'intérêt du jeu (minimap, grande carte, marqueurs) pendant les livraisons
   veh = {
     cats = {citadine = true, berline = true, familiale = true, coupe = true, sport = true, suv = true,
             pickup = true, utilitaire = true, camion = false, bus = false, toutterrain = false, engin = false, autre = true},
@@ -85,7 +86,7 @@ local DEFAULTS = {
     arrestFails = true,          -- une arrestation fait rater la livraison
     removeOnStop = true,         -- retire le trafic du mod à l'arrêt des livraisons
   },
-  ui = {tab = 'options', collapsed = false},
+  ui = {tab = 'trajet', collapsed = false},
 }
 
 local STATS_DEFAULTS = {
@@ -104,10 +105,11 @@ local CAT_LABEL = {
 }
 local POLICE_LABEL = {off = 'Aucune', patrol = 'Patrouilles', wanted = 'Recherché'}
 local TRANS_LABEL = {auto = 'Automatique', manual = 'Manuelle'}
-local UI_TABS = {options = true, lieux = true, vehicules = true, trafic = true, points = true, stats = true, parametres = true}
+local UI_TABS = {trajet = true, vehicules = true, police = true, plus = true}
+local OLD_TABS = {options = 'trajet', lieux = 'trajet', points = 'trajet', trafic = 'police', stats = 'plus', parametres = 'plus'} -- avant la 1.4
 
 local REASONS = {
-  need_points = "Mode « Mes points » : enregistre au moins 2 points de livraison sur cette map (onglet Points).",
+  need_points = "Mode « Mes points » : enregistre au moins 2 points de livraison sur cette map (onglet Trajet).",
   no_candidates = "Aucun lieu compatible sur cette map avec ces réglages (types de lieux, bitume, taille du véhicule).",
   no_destination = "Aucune destination trouvée à cette distance. Élargis la distance min / max.",
 }
@@ -129,6 +131,7 @@ local analysis = nil     -- analyse de la map en cours (coroutine étalée sur p
 local startPending = false
 local analysisErrors = 0
 local ffbHeld = {}       -- véhicules dont le retour de force est coupé pendant un chargement
+local poiSaved = nil     -- états du jeu où les points d'intérêt s'affichent (mis de côté pendant les livraisons)
 
 ---------------------------------------------------------------------------
 -- utilitaires
@@ -209,7 +212,8 @@ local function sanitizeSettings(s)
   t.policeRatio = clamp(tonumber(t.policeRatio) or 0.25, 0.05, 0.75)
   s.veh.transmission = oneOf(s.veh.transmission, {'both', 'auto', 'manual'}, 'both')
   s.summaryDuration = floor(clamp(tonumber(s.summaryDuration) or 5, 3, 15) + 0.5)
-  if not UI_TABS[s.ui.tab] then s.ui.tab = 'options' end
+  s.ui.tab = OLD_TABS[s.ui.tab] or s.ui.tab
+  if not UI_TABS[s.ui.tab] then s.ui.tab = 'trajet' end
   s.version = DEFAULTS.version
   return s
 end
@@ -1069,6 +1073,23 @@ local function releaseAllFFB()
   ffbHeld = {}
 end
 
+-- Points d'intérêt du jeu (missions, stations, garages...) : sur la minimap, la grande carte et dans
+-- le monde. Le jeu ne les affiche que dans certains états (freeroam, carrière) : on retire ces états
+-- pendant les livraisons, puis on les remet. Évite aussi les invites « lancer la mission » en se garant.
+local function setPoiHidden(hidden)
+  local pm = _G.gameplay_playmodeMarkers
+  if not pm or type(pm.validPlaymodeMarkersStates) ~= 'table' then return end
+  if hidden and not poiSaved then
+    poiSaved = {}
+    for k, v in pairs(pm.validPlaymodeMarkersStates) do poiSaved[k] = v end
+    for k in pairs(poiSaved) do pm.validPlaymodeMarkersStates[k] = nil end
+    if pm.clear then pcall(pm.clear) end
+  elseif not hidden and poiSaved then
+    for k, v in pairs(poiSaved) do pm.validPlaymodeMarkersStates[k] = v end
+    poiSaved = nil
+  end
+end
+
 local function stopSession(silent)
   if S then
     flushSummary() -- pas de chargement à venir : on peut afficher le résumé en attente
@@ -1079,6 +1100,7 @@ local function stopSession(silent)
     trafficCtl.clearSirenPatches()
     trafficCtl.resetTuning()
     releaseAllFFB()
+    setPoiHidden(false)
     if settings.traffic.mode == 'on' and settings.traffic.removeOnStop then trafficCtl.removeOwned() end
     endFade()
   end
@@ -1804,6 +1826,7 @@ end
 local function onExtensionUnloaded()
   if S and S.faded then endFade() end
   releaseAllFFB()
+  setPoiHidden(false)
   clearVisuals()
 end
 
@@ -1924,6 +1947,7 @@ function M.start()
   if not ensurePool() then toast('err', 'Impossible de lire la liste des véhicules.') return end
   S = newSession()
   S.trafficPending = settings.traffic.mode ~= 'keep'
+  if settings.hidePoi then setPoiHidden(true) end
   prepareNext({})
 end
 
