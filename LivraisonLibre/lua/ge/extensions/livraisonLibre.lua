@@ -13,7 +13,7 @@ local trafficCtl = require('/lua/ge/extensions/livraisonLibre/trafficCtl')
 local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 local timing = require('/lua/ge/extensions/livraisonLibre/timing')
 
-local VERSION = '1.7.3'
+local VERSION = '1.7.4'
 local DATA_DIR = '/settings/livraisonLibre/'
 local DECAL_TEXTURE = 'art/shapes/interface/parkDecalStripes.png'
 -- réglages internes (regroupés : le fichier approche la limite de 200 variables locales de Lua)
@@ -33,6 +33,7 @@ K.SPEED_WINDOW = 8           -- échantillons pour lisser la vitesse (pics paras
 K.MAX_PLAUSIBLE_SPEED = 140  -- m/s (~500 km/h) : au-delà, la mesure est ignorée
 K.SUMMARY_DELAY = 0.9        -- s : délai après la fin du fondu avant d'afficher le résumé
 K.POLICE_CLEAR_DIST = 100    -- m : police écartée en approche de la zone
+K.TRAFFIC_CLEAR_DIST = 50    -- m : à moins de 50 m de la place, le trafic autour est envoyé plus loin
 K.ANALYSIS_BUDGET = 0.006    -- s de calcul par image pour l'analyse de la map (le jeu ne fige jamais)
 K.ANALYSIS_TIMEOUT = 45      -- s : au-delà, l'analyse est abandonnée avec un message
 K.ANALYSIS_FILE = DATA_DIR .. 'analyse.txt' -- étapes de la dernière analyse (diagnostic)
@@ -88,6 +89,7 @@ local DEFAULTS = {
     civiliansIgnoreSirens = true,-- pendant les livraisons, les PNJ ne se rangent plus pour les sirènes
     policeNoSiren = false,       -- secours : police sans gyrophares ni sirènes
     clearPoliceNearEnd = true,   -- à moins de 100 m de l'arrivée : police écartée, poursuite terminée
+    clearNearSpot = true,        -- à moins de 50 m de la place : trafic autour envoyé plus loin
     progressive = true,          -- difficulté qui monte avec les étoiles (agressivité, barrages, renforts, police lourde)
     npcChases = true,            -- la police poursuit aussi des PNJ suspects (événement aléatoire du trafic)
     arrestFails = true,          -- une arrestation fait rater la livraison
@@ -1759,6 +1761,17 @@ local function updateDriving(dtReal, dtSim)
       S.policeClearTimer = 1
       S.wanted, S.wasWanted = nil, nil -- pas de nouvelle recherche une fois près de l'arrivée
       trafficCtl.clearPoliceNear(vid, zone, K.POLICE_CLEAR_DIST * 3)
+    end
+  end
+
+  -- à moins de 50 m de la place : tout le trafic autour est envoyé plus loin (PNJ arrêté ou garé sur la
+  -- place, voitures qui passent dessus...)
+  if settings.traffic.clearNearSpot and S.zoneDist < K.TRAFFIC_CLEAR_DIST then
+    S.nearClearTimer = (S.nearClearTimer or 0) - dtReal
+    if S.nearClearTimer <= 0 then
+      S.nearClearTimer = 0.5
+      local n = trafficCtl.clearAround(zone, K.TRAFFIC_CLEAR_DIST, vid, {[vid] = true, [be:getPlayerVehicleID(0)] = true})
+      if n > 0 then log('I', logTag, n .. ' véhicule(s) du trafic écarté(s) de la place de livraison') end
     end
   end
 

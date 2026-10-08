@@ -26,7 +26,7 @@ local TRAFFIC_W = 2.0   -- m : largeur d'une voiture du trafic
 local PASS_MARGIN = 0.5 -- m : marge de chaque côté pour passer entre deux voitures (pas « au millimètre »)
 local LANE_W = 3.6      -- m : largeur d'une voie quand la map ne donne pas le nombre de voies
 -- part du temps perdu derrière le trafic selon la route (multipliée par la densité et l'écart de vitesse)
-local BLOCK = {squeeze = 0.05, lanes = 0.12, twoWay = 0.20, twoWayTown = 0.30, oneLane = 0.45}
+local BLOCK = {squeeze = 0.025, lanes = 0.06, twoWay = 0.10, twoWayTown = 0.15, oneLane = 0.22}
 
 -- limit : facteur sur la limitation de vitesse
 -- wgain : effet de la largeur de la route sur ce facteur (route large : plus vite, route étroite : moins vite)
@@ -40,17 +40,17 @@ local BLOCK = {squeeze = 0.05, lanes = 0.12, twoWay = 0.20, twoWayTown = 0.30, o
 -- margin : marge sur le temps simulé
 M.LEVELS = {
   {id = 'tres_facile', label = 'Très facile',    limit = 0.9, wgain = 0.06, free = 0,    grip = 0.40, accel = 0.45, brake = 0.40, line = 1.05,
-   town = 1,    tfree = 0,    jn = 26, down = 2.0, park = 40, margin = 1.45},
+   town = 1,    tfree = 0,    jn = 26, down = 2.0, park = 36, margin = 1.33},
   {id = 'facile',      label = 'Facile',         limit = 1.0, wgain = 0.08, free = 0,    grip = 0.50, accel = 0.55, brake = 0.50, line = 1.08,
-   town = 1,    tfree = 0,    jn = 32, down = 1.6, park = 32, margin = 1.25},
+   town = 1,    tfree = 0,    jn = 32, down = 1.6, park = 28, margin = 1.12},
   {id = 'moyen',       label = 'Moyen',          limit = 1.2, wgain = 0.17, free = 0.05, grip = 0.65, accel = 0.75, brake = 0.65, line = 1.15,
-   town = 0.7,  tfree = 0,    jn = 42, down = 1.2, park = 25, margin = 1.12},
+   town = 0.7,  tfree = 0,    jn = 42, down = 1.2, park = 22, margin = 1.0},
   {id = 'dur',         label = 'Difficile',      limit = 1.5, wgain = 0.33, free = 0.15, grip = 0.80, accel = 0.90, brake = 0.80, line = 1.35,
-   town = 0.65, tfree = 0,    jn = 55, down = 0.8, park = 20, margin = 1.05},
+   town = 0.65, tfree = 0,    jn = 55, down = 0.8, park = 18, margin = 0.91},
   {id = 'tres_dur',    label = 'Très difficile', limit = 1.9, wgain = 0.47, free = 0.35, grip = 0.92, accel = 1.0,  brake = 0.92, line = 1.6,
-   town = 0.65, tfree = 0.1,  jn = 65, down = 0.5, park = 16, margin = 1.0},
+   town = 0.65, tfree = 0.1,  jn = 65, down = 0.5, park = 14, margin = 0.89},
   {id = 'impossible',  label = 'Impossible',     limit = 2.0, wgain = 0.5,  free = 1,    grip = 1.05, accel = 1.0,  brake = 1.0,  line = 2.0,
-   town = 0.55, tfree = 0.3,  jn = 78, down = 0.2, park = 12, margin = 0.95},
+   town = 0.55, tfree = 0.3,  jn = 78, down = 0.2, park = 10, margin = 0.85},
 }
 M.byId = {}
 for i, l in ipairs(M.LEVELS) do l.index = i; M.byId[l.id] = l end
@@ -315,7 +315,7 @@ function M.estimate(points, veh, level, opts)
 end
 
 -- Secours sans trajet détaillé : vitesse moyenne typique par niveau (m/s)
-local FALLBACK_SPEED = {tres_facile = 9, facile = 11, moyen = 13.5, dur = 16, tres_dur = 19, impossible = 23}
+local FALLBACK_SPEED = {tres_facile = 9.8, facile = 12.2, moyen = 15.3, dur = 18.8, tres_dur = 21.8, impossible = 26}
 function M.fallback(dist, level)
   return (tonumber(dist) or 0) / (FALLBACK_SPEED[level] or FALLBACK_SPEED.moyen)
 end

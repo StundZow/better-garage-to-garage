@@ -124,6 +124,8 @@ Quand le mod crée lui-même la police, environ un tiers des voitures de police 
 
 Dans le jeu de base, les voitures de trafic se rangent dès qu'elles détectent un gyrophare à proximité — avec une police qui patrouille en permanence, toute la ville finit à l'arrêt. Pendant une livraison, le mod masque les gyrophares aux PNJ : ils continuent de rouler normalement. Si certains s'arrêtent encore, l'option *Police sans gyrophares ni sirènes* coupe directement les gyrophares des voitures de police. Tout est rétabli quand tu arrêtes les livraisons, y compris les réglages de la police du jeu (sévérité, poursuites de PNJ).
 
+À moins de 50 m de ta place, le trafic autour est envoyé plus loin — plus de PNJ arrêté sur ta place de bord de route au moment de te garer (option *Dégager la place à l'arrivée*, Difficulté › Plus d'options ; la police lancée à ta poursuite n'est pas concernée).
+
 ## Tester sans lancer le jeu
 
 Les modules Lua tournent hors du jeu avec LuaJIT (via [lupa](https://pypi.org/project/lupa/)) dans un BeamNG simulé : une ville générée, des parties complètes jouées image par image (départ, trajet, zone, frein à main, changements de véhicule, police, sirènes…).

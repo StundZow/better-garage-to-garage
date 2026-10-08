@@ -335,6 +335,35 @@ function M.clearZone(zone, ignore)
   return moved
 end
 
+-- À l'approche de la place (joueur à moins de 50 m) : tout le trafic autour de la place est envoyé plus loin
+-- (voitures qui roulent, arrêtées ou garées dessus), sauf la police lancée à la poursuite du joueur.
+function M.clearAround(zone, radius, playerId, ignore)
+  local gt = _G.gameplay_traffic
+  local moved = 0
+  if gt and gt.getTrafficData and gt.forceTeleport and zone then
+    local ok, data = pcall(gt.getTrafficData)
+    if ok and type(data) == 'table' then
+      local r2 = radius * radius
+      local pos = vec3(zone.x, zone.y, zone.z)
+      for id, veh in pairs(data) do
+        local role = veh.role
+        local chasing = role and role.flags and role.flags.pursuit and role.targetId == playerId
+        if veh.isAi and not chasing and not (ignore and ignore[id]) then
+          local obj = getObjectByID(id)
+          if obj then
+            local p = obj:getPosition()
+            local dx, dy = p.x - zone.x, p.y - zone.y
+            if dx * dx + dy * dy < r2 and math.abs(p.z - zone.z) < 8 then
+              if pcall(gt.forceTeleport, id, pos, nil, 400, 900) then moved = moved + 1 end
+            end
+          end
+        end
+      end
+    end
+  end
+  return moved + M.clearZone(zone, ignore) -- et les voitures garées sur la place
+end
+
 -- Difficulté progressive selon les étoiles. Le jeu a 3 comportements : niveau 1 = la police suit sans
 -- foncer (1-2 étoiles), niveau 2 = poursuite agressive (3-4 étoiles), niveau 3 = barrages (5 étoiles).
 -- On ajuste en plus, étoile par étoile : agressivité de l'IA, fréquence des barrages, difficulté pour

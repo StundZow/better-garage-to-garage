@@ -296,7 +296,10 @@ M.start()
 frames(80)
 check(sess().phase == 'driving', 'en route', sess().phase)
 check(hud().stars == 0 and hud().policeOn == true, 'étoiles affichées (0) quand la police est active')
-frames(60 * 3)
+for _ = 1, 60 * 6 do -- la recherche s'arme 2,5 s après le début de la livraison (chargement du trafic compris)
+  frames(1)
+  if env.wantedVeh then break end
+end
 check(env.wantedVeh == getPlayerVehicle(0).id and env.wantedLevel == 2, 'recherché : 4 étoiles -> niveau 2 du jeu', env.wantedLevel)
 env.pursuitData = {mode = 1, score = 150}
 M.onPursuitAction(getPlayerVehicle(0).id, 'start', env.pursuitData)
@@ -969,6 +972,55 @@ end
 check(close == 0 and sess() ~= nil, 'départs variés : 6 livraisons, jamais deux fois au même endroit', detail)
 M.stop()
 M.setSettings({autoNext = true})
+
+print('-- v1.7.4 : place dégagée à l arrivée (trafic à moins de 50 m)')
+-- (sans « Écarter la police près de l'arrivée », pour vérifier qu'on laisse la police qui poursuit)
+M.setSettings({timeLimit = false, autoNext = false, instantNext = false, traffic = {mode = 'keep', police = 'off', clearNearSpot = true, clearPoliceNearEnd = false}})
+M.start()
+frames(400)
+local z1 = env.lastZone
+local onSpot = env.newVeh('oldie', '/vehicles/oldie/base.pc', vec3(z1.x, z1.y, z1.z))
+local passing = env.newVeh('oldie', '/vehicles/oldie/base.pc', vec3(z1.x + 35, z1.y, z1.z))
+local farCar = env.newVeh('oldie', '/vehicles/oldie/base.pc', vec3(z1.x + 120, z1.y, z1.z))
+local chaser = env.newVeh('sedanx', '/vehicles/sedanx/police.pc', vec3(z1.x + 20, z1.y, z1.z))
+local me = getPlayerVehicle(0)
+env.traffic.data = {
+  [onSpot.id] = {isAi = true, roleName = 'standard', speed = 0},
+  [passing.id] = {isAi = true, roleName = 'standard', speed = 12},
+  [farCar.id] = {isAi = true, roleName = 'standard', speed = 12},
+  [chaser.id] = {isAi = true, roleName = 'police', role = {name = 'police', flags = {pursuit = true}, targetId = me.id}},
+}
+env.traffic.teleported = {}
+me.pos = vec3(z1.x + 200, z1.y, z1.z)
+frames(60)
+local early = {}
+for _, t in ipairs(env.traffic.teleported) do early[t.id] = true end
+check(not early[passing.id], 'loin de la place : le trafic qui passe n est pas touché')
+me.pos = vec3(z1.x + 40, z1.y, z1.z)
+frames(60)
+local moved = {}
+for _, t in ipairs(env.traffic.teleported) do moved[t.id] = true end
+check(moved[passing.id] and not moved[farCar.id] and not moved[chaser.id],
+  'à moins de 50 m : le trafic autour de la place est envoyé plus loin (pas la police qui poursuit, pas les voitures loin)')
+check(moved[onSpot.id] == true, 'PNJ arrêté sur la place : dégagé')
+env.traffic.data = {}
+onSpot:delete(); passing:delete(); farCar:delete(); chaser:delete()
+M.stop()
+-- option coupée : on ne touche à rien
+M.setSettings({traffic = {clearNearSpot = false}})
+M.start()
+frames(400)
+local z2 = env.lastZone
+local p2 = env.newVeh('oldie', '/vehicles/oldie/base.pc', vec3(z2.x + 30, z2.y, z2.z))
+env.traffic.data = {[p2.id] = {isAi = true, roleName = 'standard', speed = 12}}
+env.traffic.teleported = {}
+getPlayerVehicle(0).pos = vec3(z2.x + 40, z2.y, z2.z)
+frames(60)
+check(#env.traffic.teleported == 0, 'option coupée : le trafic près de la place n est pas touché')
+env.traffic.data = {}
+p2:delete()
+M.stop()
+M.setSettings({autoNext = true, traffic = {clearNearSpot = true, clearPoliceNearEnd = true}})
 
 print('-- relecture complète du mod : corrections')
 -- police du jeu : ses réglages sont remis comme avant à l'arrêt, même en « Ne pas toucher »

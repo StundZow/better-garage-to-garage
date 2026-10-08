@@ -420,6 +420,10 @@
               <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.removeOnStop" ng-change="push()"><span></span></label>
             </div>
           </div>
+          <div class="ll-row" ng-if="s.traffic.mode !== 'off'">
+            <div><div class="ll-row-title">Dégager la place à l'arrivée</div><div class="ll-hint">À moins de 50 m de la place, le trafic autour est envoyé plus loin.</div></div>
+            <label class="ll-switch"><input type="checkbox" ng-model="s.traffic.clearNearSpot" ng-change="push()"><span></span></label>
+          </div>
           <div ng-if="s.traffic.mode !== 'off' && !(s.traffic.mode === 'on' && s.traffic.police === 'off')">
             <div class="ll-slider" ng-if="s.traffic.mode === 'on'">
               <div class="ll-slider-head"><span>Sévérité</span><b>{{ strictLabel(s.traffic.strictness) }}</b></div>
