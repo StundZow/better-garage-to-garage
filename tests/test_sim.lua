@@ -793,6 +793,7 @@ print('-- v1.6 : temps limite selon la difficulté')
 local limits = {}
 for _, lvl in ipairs({'tres_facile', 'moyen', 'dur'}) do
   M.setSettings({timeLimit = true, timeLevel = lvl, minDist = 600, autoNext = false, instantNext = false, traffic = {mode = 'keep', police = 'off'}})
+  M.onClientPostStartMission('/levels/testcity/main.level.json') -- map rechargée : lieux récents oubliés, même livraison
   math.randomseed(4242)
   M.start()
   frames(400)
@@ -939,6 +940,33 @@ getPlayerVehicle(0).parkbrake = 0.15
 frames(90)
 getPlayerVehicle(0).parkbrake = 0
 check(sess().phase == 'summary', 'frein à main à 15 % : livraison validée', sess().phase)
+M.stop()
+M.setSettings({autoNext = true})
+
+print('-- v1.7.2 : départs variés (lieux récents évités)')
+M.setSettings({timeLimit = false, autoNext = false, instantNext = false, minDist = 300, maxDist = 900, traffic = {mode = 'keep', police = 'off'}})
+M.start()
+frames(400)
+local starts = {}
+for _ = 1, 6 do
+  local v0 = getPlayerVehicle(0)
+  starts[#starts + 1] = vec3(v0.pos)
+  M.skip()
+  -- attendre le nouveau véhicule (fondu, chargement) avant de relever sa position
+  for _ = 1, 1500 do
+    frames(1)
+    local v = getPlayerVehicle(0)
+    if v and v.id ~= v0.id and sess() and sess().phase == 'driving' then break end
+  end
+end
+local close, detail = 0, nil
+for i = 1, #starts do
+  for j = i + 1, #starts do
+    local d = (starts[i] - starts[j]):length()
+    if d < 100 then close = close + 1; detail = detail or string.format('%d et %d à %.0f m', i, j, d) end
+  end
+end
+check(close == 0 and sess() ~= nil, 'départs variés : 6 livraisons, jamais deux fois au même endroit', detail)
 M.stop()
 M.setSettings({autoNext = true})
 

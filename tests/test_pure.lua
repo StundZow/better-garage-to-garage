@@ -528,6 +528,52 @@ do
   check(bad == nil, 'en côte et en descente : niveau plus dur = jamais plus de temps', bad)
 end
 
+print('-- bretelles de voie rapide : pas des carrefours')
+do
+  -- voie rapide à sens unique vers +x (120 km/h) avec une sortie et une entrée en biais tous les 200 m,
+  -- et un seul vrai croisement (une rue à double sens) au milieu
+  local nodes = {}
+  local function node(id, x, y) nodes[id] = {pos = {x = x, y = y, z = 10}, radius = 6, links = {}, normal = {x = 0, y = 0, z = 1}} end
+  local function link(a, b, data)
+    data = data or {}
+    data.drivability = 1
+    data.inNode = data.inNode or a
+    local outNode = (data.inNode == a) and b or a
+    nodes[outNode].links[data.inNode] = data
+  end
+  for i = 0, 15 do node('f' .. i, i * 200, 0) end
+  for i = 0, 14 do link('f' .. i, 'f' .. (i + 1), {oneWay = true, inNode = 'f' .. i, speedLimit = 33.3, lanes = '++'}) end
+  for i = 1, 14 do
+    if i ~= 8 then
+      node('off' .. i, i * 200 + 60, -25); link('f' .. i, 'off' .. i, {oneWay = true, inNode = 'f' .. i, speedLimit = 20})
+      node('on' .. i, i * 200 - 60, -25); link('on' .. i, 'f' .. i, {oneWay = true, inNode = 'on' .. i, speedLimit = 20})
+    end
+  end
+  node('rue', 8 * 200, 120); link('f8', 'rue', {speedLimit = 14})
+  local gf = graph.build(nodes)
+  local function edgeOf(a, b)
+    local ia, ib = gf.idx[a], gf.idx[b]
+    for _, ei in ipairs(gf.adj[ia]) do local e = gf.edges[ei] if (e.a == ia and e.b == ib) or (e.a == ib and e.b == ia) then return ei, e.a == ia end end
+  end
+  local e1, fwd1 = edgeOf('f0', 'f1')
+  local e2, fwd2 = edgeOf('f14', 'f15')
+  local pts = graph.route(gf, {e = e1, t = fwd1 and 0 or 1}, {e = e2, t = fwd2 and 1 or 0})
+  local nJn, nDeg = 0, 0
+  for k = 2, #(pts or {}) - 1 do
+    if pts[k].jn then nJn = nJn + 1 end
+    if (pts[k].deg or 0) >= 3 then nDeg = nDeg + 1 end
+  end
+  check(pts and nDeg >= 13 and nJn == 1, 'voie rapide : bretelles ignorées, seul le vrai croisement compte', string.format('%d noeuds à 3 routes, %d carrefours', nDeg, nJn))
+  -- même temps qu'une voie rapide sans bretelle (le croisement seul, isolé, ne ralentit pas)
+  local plain = {}
+  for k, p in ipairs(pts or {}) do plain[k] = {x = p.x, y = p.y, z = p.z, speed = p.speed, drv = p.drv, r = p.r, lanes = p.lanes, oneWay = p.oneWay} end
+  local sedanF = timing.vehicleModel({top = 60, z100 = 8, brakeG = 1.05, height = 1.4}, 'berline')
+  for _, lvl in ipairs({'facile', 'dur', 'tres_dur'}) do
+    local tr, tp = timing.estimate(pts, sedanF, lvl), timing.estimate(plain, sedanF, lvl)
+    check(math.abs(tr - tp) < 0.01, 'voie rapide avec bretelles : pas ralentie (' .. lvl .. ')', string.format('%.1f / %.1f s', tr, tp))
+  end
+end
+
 print('-- comportement du véhicule (drifteuse / accrocheuse)')
 do
   local base = {top = 60, z100 = 5.5, brakeG = 1.1, height = 1.35, power = 400, weight = 1500}
@@ -783,6 +829,34 @@ do
     if r and (r.dest == byId.short or r.pickup == byId.short) then seenShort = true end
   end
   check(nMis > 30 and not seenShort, 'bus : jamais dans une allée trop courte', nMis)
+end
+
+print('-- départs et arrivées : lieux récents évités')
+do
+  local cands = loc.buildRoadSpots(g)
+  local avoid = {}
+  local ctxA = {g = g, cands = cands, minD = 200, maxD = 900, vehW = 2, vehL = 4.8, scale = 1.3, legalSide = 1, rng = rng, avoid = avoid}
+  local nearP, nearD, n = 0, 0, 0
+  for _ = 1, 30 do
+    local r = loc.pickMission(ctxA)
+    if r then
+      n = n + 1
+      for _, p in ipairs(avoid) do
+        if (r.pickup.x - p.x) ^ 2 + (r.pickup.y - p.y) ^ 2 < 150 ^ 2 then nearP = nearP + 1 end
+        if (r.dest.x - p.x) ^ 2 + (r.dest.y - p.y) ^ 2 < 150 ^ 2 then nearD = nearD + 1 end
+      end
+      table.insert(avoid, 1, {x = r.pickup.x, y = r.pickup.y})
+      table.insert(avoid, 1, {x = r.dest.x, y = r.dest.y})
+      while #avoid > 10 do table.remove(avoid) end
+    end
+  end
+  check(n == 30 and nearP == 0, 'nouveau départ : jamais près des 5 derniers départs et arrivées', n .. ' livraisons, ' .. nearP .. ' trop proches')
+  check(nearD <= 3, 'nouvelle arrivée : presque jamais près des lieux récents', nearD)
+  -- tous les lieux ont déjà servi : on trouve quand même une livraison à la bonne distance
+  local all = {}
+  for _, c in ipairs(cands) do all[#all + 1] = {x = c.x, y = c.y} end
+  local rAll = loc.pickMission({g = g, cands = cands, minD = 200, maxD = 900, vehW = 2, vehL = 4.8, scale = 1.3, legalSide = 1, rng = rng, avoid = all})
+  check(rAll ~= nil and not rAll.relaxed, 'tous les lieux déjà utilisés : livraison quand même trouvée')
 end
 
 print('-- départ en fond d allée : avant vers la rue (égalité a/b)')

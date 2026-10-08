@@ -336,7 +336,20 @@ local function chooseDest(ctx, pool, p, maxSearch, dir)
   return inRange, others, distU ~= nil
 end
 
-local function finalizeDest(ctx, list)
+-- Lieux utilisés récemment (départs et arrivées des dernières livraisons, ctx.avoid = {{x, y}...}) :
+-- on en prend d'autres tant qu'il y en a, pour ne pas repartir toujours du même endroit
+local AVOID_R2 = 150 * 150
+local function nearRecent(ctx, c)
+  local av = ctx.avoid
+  if not av then return false end
+  for _, p in ipairs(av) do
+    local dx, dy = c.x - p.x, c.y - p.y
+    if dx * dx + dy * dy < AVOID_R2 then return true end
+  end
+  return false
+end
+
+local function finalizeAny(ctx, list)
   local tries = 0
   while #list > 0 and tries < 40 do
     tries = tries + 1
@@ -349,6 +362,19 @@ local function finalizeDest(ctx, list)
     removeItem(list, item)
   end
   return nil
+end
+
+-- Destination : d'abord un lieu pas utilisé récemment, sinon n'importe lequel de la liste
+local function finalizeDest(ctx, list)
+  if ctx.avoid and ctx.avoid[1] then
+    local fresh = {}
+    for _, it in ipairs(list) do if not nearRecent(ctx, it.c) then fresh[#fresh + 1] = it end end
+    if #fresh > 0 and #fresh < #list then
+      local item, zone = finalizeAny(ctx, fresh)
+      if item then return item, zone end
+    end
+  end
+  return finalizeAny(ctx, list)
 end
 
 -- Oriente la zone de départ (donc le véhicule au spawn) dans le sens du trajet GPS vers la destination.
@@ -518,26 +544,38 @@ function M.pickMission(ctx)
   end
 
   local lastPickup, lastPickupZone, trapped
-  for _ = 1, (ctx.maxTries or 12) do
+  local function tryPickups(list)
     local wrapped = {}
-    for i, c in ipairs(pickPool) do wrapped[i] = {c = c} end
-    local pItem = pickByKind(wrapped, ctx.rng)
-    if not pItem then break end
-    local pickup = pItem.c
-    local pZone = M.zoneFor(pickup, ctx.vehW, ctx.vehL, ctx.scale, ctx.legalSide, (ctx.rng(2) == 1) and 1 or -1)
-    if pZone and (not ctx.isFree or ctx.isFree(pZone, pickup)) then
-      local inRange, _, isTrapped = chooseDest(ctx, pool, pickup, searchMax, 1)
-      if isTrapped then
-        -- départ coincé par des sens uniques sans issue (le GPS partirait à contresens) : on en
-        -- essaie un autre, celui-ci reste en dernier recours
-        trapped = trapped or {pickup = pickup, zone = pZone, inRange = inRange}
-      else
-        local item, zone = finalizeDest(ctx, inRange)
-        if item then return mission(pickup, pZone, item, zone, false) end
-        lastPickup, lastPickupZone = pickup, pZone
+    for i, c in ipairs(list) do wrapped[i] = {c = c} end
+    for _ = 1, (ctx.maxTries or 12) do
+      local pItem = pickByKind(wrapped, ctx.rng)
+      if not pItem then break end
+      local pickup = pItem.c
+      local pZone = M.zoneFor(pickup, ctx.vehW, ctx.vehL, ctx.scale, ctx.legalSide, (ctx.rng(2) == 1) and 1 or -1)
+      if pZone and (not ctx.isFree or ctx.isFree(pZone, pickup)) then
+        local inRange, _, isTrapped = chooseDest(ctx, pool, pickup, searchMax, 1)
+        if isTrapped then
+          -- départ coincé par des sens uniques sans issue (le GPS partirait à contresens) : on en
+          -- essaie un autre, celui-ci reste en dernier recours
+          trapped = trapped or {pickup = pickup, zone = pZone, inRange = inRange}
+        else
+          local item, zone = finalizeDest(ctx, inRange)
+          if item then return mission(pickup, pZone, item, zone, false) end
+          lastPickup, lastPickupZone = pickup, pZone
+        end
       end
     end
+    return nil
   end
+  -- d'abord un départ pas utilisé récemment ; sinon (rien d'autre à la bonne distance) n'importe lequel
+  local freshPool = {}
+  if ctx.avoid and ctx.avoid[1] then
+    for _, c in ipairs(pickPool) do if not nearRecent(ctx, c) then freshPool[#freshPool + 1] = c end end
+  end
+  local found
+  if #freshPool > 0 and #freshPool < #pickPool then found = tryPickups(freshPool) end
+  if not found then found = tryPickups(pickPool) end
+  if found then return found end
 
   if trapped then
     local item, zone = finalizeLegalFirst(trapped.inRange)

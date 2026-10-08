@@ -126,7 +126,10 @@ local function junctions(points)
       local a, b = points[i - 1], points[i]
       s = s + sqrt((b.x - a.x) ^ 2 + (b.y - a.y) ^ 2 + (b.z - a.z) ^ 2)
     end
-    if i > 1 and i < #points and (tonumber(points[i].deg) or 0) >= 3 then
+    -- jn : vrai carrefour d'après graph.route (pas une bretelle d'autoroute) ; sinon, d'après deg
+    local isJn
+    if points[i].jn ~= nil then isJn = points[i].jn else isJn = (tonumber(points[i].deg) or 0) >= 3 end
+    if i > 1 and i < #points and isJn then
       if not all[1] or s - all[#all] > JUNCTION_MERGE then all[#all + 1] = s end
     end
   end

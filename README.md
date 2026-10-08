@@ -63,7 +63,7 @@ Parce qu'il tourne toujours entre les mêmes garages. Ici les destinations vienn
 
 ## Comment ça marche
 
-Au lancement, le mod construit son propre graphe à partir du réseau routier de la map (par petites tranches, quelques millisecondes par image, avec un délai maximal), repère les impasses privées (les allées de maisons) et y ajoute les places de parking et lieux d'intérêt fournis par la map. Un Dijkstra borné choisit ensuite une destination dont la distance **par la route** tombe dans ta fourchette — en respectant les sens uniques, comme le GPS — sur une place libre et assez grande pour le véhicule tiré (une allée de maison doit être assez profonde pour lui).
+Au lancement, le mod construit son propre graphe à partir du réseau routier de la map (par petites tranches, quelques millisecondes par image, avec un délai maximal), repère les impasses privées (les allées de maisons) et y ajoute les places de parking et lieux d'intérêt fournis par la map. Un Dijkstra borné choisit ensuite une destination dont la distance **par la route** tombe dans ta fourchette — en respectant les sens uniques, comme le GPS — sur une place libre et assez grande pour le véhicule tiré (une allée de maison doit être assez profonde pour lui). Les lieux de départ et d'arrivée des dernières livraisons sont évités tant qu'il y en a d'autres à la bonne distance : on ne repart pas toujours du même endroit.
 
 La zone au sol est le marquage « P » du jeu, redimensionné à la taille du véhicule ; elle passe au bleu dès que la boîte englobante du véhicule est entièrement dedans. Si tu changes de véhicule en route (à la main ou avec « Autre véhicule »), la zone s'adapte — et si le nouveau ne rentre pas, la livraison passe à la place compatible la plus proche. Un véhicule avec lequel tu as roulé moins de 500 m n'est pas noté dans le journal.
 
@@ -83,7 +83,7 @@ Pour chaque livraison, le mod reconstitue le trajet sur le réseau routier de la
 
 **Comportement du véhicule** — d'après sa fiche (transmission, puissance, poids, config) : une 4 roues motrices accroche ; une propulsion très puissante pour son poids, ou une config de drift, glisse : on exploite moins bien son adhérence, et en sortie de virage il faut attendre d'être plus droit pour accélérer. Dans tous les cas, en plein virage on ne peut pas freiner ni accélérer à fond, l'adhérence sert d'abord à tourner. Des pneus tout-terrain perdent moins d'adhérence sur la terre.
 
-**En ville** — là où les carrefours se suivent à moins de 220 m — on ralentit à chaque carrefour et on dépasse moins la limitation.
+**En ville** — là où les carrefours se suivent à moins de 220 m — on ralentit à chaque carrefour et on dépasse moins la limitation. Seuls les vrais croisements comptent : une bretelle d'entrée ou de sortie de voie rapide n'en est pas un.
 
 **Avec du trafic** (celui du mod, ou celui du jeu en « Ne pas toucher »), les voitures roulent à la limitation : plus tu vas vite, plus tu les rattrapes. Pour chaque bout de route, le mod regarde si ton véhicule peut passer entre deux voitures côte à côte (chacune au milieu de sa voie) avec **50 cm de marge de chaque côté** — pas au millimètre près. Si ça passe, tu ne perds presque rien. S'il y a deux voies dans ton sens, tu doubles en changeant de voie. Sinon, tu dois te rabattre derrière elles et doubler quand la voie d'en face est libre, ou rester derrière sur un sens unique à une voie. Une citadine passe donc là où un bus doit attendre.
 

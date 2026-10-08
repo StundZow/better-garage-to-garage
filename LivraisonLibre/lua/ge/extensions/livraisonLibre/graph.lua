@@ -366,6 +366,35 @@ end
 -- segment), dans le sens de circulation comme le GPS du jeu. Renvoie la liste des points du trajet
 -- {x, y, z, speed, drv, r} ; chaque point porte les caractéristiques de la route qui part de lui
 -- (limitation en m/s, drivability, demi-largeur). nil si aucun chemin.
+-- Vrai carrefour sur le trajet : une autre route s'y croise (à double sens, ou qui part franchement de
+-- côté). Une bretelle à sens unique qui quitte la route dans son sens (sortie) ou la rejoint par l'arrière
+-- (entrée de voie rapide) n'en est pas un : on n'y croise personne.
+local MERGE_COS = 0.77 -- moins de 40° avec la route
+local function unit2(x, y)
+  local l = sqrt(x * x + y * y)
+  if l < 1e-6 then return 0, 0 end
+  return x / l, y / l
+end
+
+local function isCrossing(g, node, inE, outE, px, py, nx, ny)
+  if (g.deg[node] or 0) < 3 then return false end
+  local x, y = g.x[node], g.y[node]
+  local ix, iy = unit2(x - px, y - py) -- sens d'arrivée
+  local ox, oy = unit2(nx - x, ny - y) -- sens de départ
+  for _, ei in ipairs(g.adj[node]) do
+    if ei ~= inE and ei ~= outE then
+      local e = g.edges[ei]
+      if not (e.oneWay and e.inNode) then return true end
+      local o = (e.a == node) and e.b or e.a
+      local bx, by = unit2(g.x[o] - x, g.y[o] - y)
+      local diverge = bx * ox + by * oy >= MERGE_COS
+      local merge = -(bx * ix + by * iy) >= MERGE_COS
+      if not (diverge or merge) then return true end
+    end
+  end
+  return false
+end
+
 local function edgePoint(g, e, t)
   return g.x[e.a] + (g.x[e.b] - g.x[e.a]) * t, g.y[e.a] + (g.y[e.b] - g.y[e.a]) * t, g.z[e.a] + (g.z[e.b] - g.z[e.a]) * t
 end
@@ -376,10 +405,10 @@ function M.route(g, from, to, maxDist)
   if not ef or not et then return nil end
   local ft, tt = from.t or 0, to.t or 0
   local pts = {}
-  -- node : noeud du réseau à ce point (deg = nombre de routes qui s'y rejoignent : carrefour si 3 ou plus)
-  local function add(x, y, z, e, node)
+  -- node : noeud du réseau à ce point (deg = nombre de routes qui s'y rejoignent) ; jn : vrai carrefour
+  local function add(x, y, z, e, node, jn)
     pts[#pts + 1] = {x = x, y = y, z = z, speed = e and e.speed, drv = e and e.drv,
-      r = e and (g.r[e.a] + g.r[e.b]) * 0.5, deg = node and g.deg[node] or nil,
+      r = e and (g.r[e.a] + g.r[e.b]) * 0.5, deg = node and g.deg[node] or nil, jn = jn,
       lanes = e and e.lanes, oneWay = e and e.oneWay}
   end
   local function direct()
@@ -415,11 +444,18 @@ function M.route(g, from, to, maxDist)
     if guard > g.n then return nil end
   end
   local x, y, z = edgePoint(g, ef, ft)
+  local ex, ey = edgePoint(g, et, tt)
   add(x, y, z, ef)
   for k = #nodes, 1, -1 do
     local node = nodes[k]
     local e = (k > 1) and g.edges[used[k - 1]] or et
-    add(g.x[node], g.y[node], g.z[node], e, node)
+    -- voisins sur le trajet (point de départ / d'arrivée aux extrémités) et segments par lesquels on passe
+    local pv, nx = nodes[k + 1], nodes[k - 1]
+    local px, py = pv and g.x[pv] or x, pv and g.y[pv] or y
+    local qx, qy = nx and g.x[nx] or ex, nx and g.y[nx] or ey
+    local inE = (k < #nodes) and used[k] or from.e
+    local outE = (k > 1) and used[k - 1] or to.e
+    add(g.x[node], g.y[node], g.z[node], e, node, isCrossing(g, node, inE, outE, px, py, qx, qy))
   end
   x, y, z = edgePoint(g, et, tt)
   add(x, y, z, nil)

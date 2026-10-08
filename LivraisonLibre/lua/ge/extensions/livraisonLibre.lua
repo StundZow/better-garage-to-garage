@@ -13,28 +13,30 @@ local trafficCtl = require('/lua/ge/extensions/livraisonLibre/trafficCtl')
 local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 local timing = require('/lua/ge/extensions/livraisonLibre/timing')
 
-local VERSION = '1.7.1'
+local VERSION = '1.7.2'
 local DATA_DIR = '/settings/livraisonLibre/'
-local SETTINGS_FILE = DATA_DIR .. 'settings.json'
-local STATS_FILE = DATA_DIR .. 'stats.json'
-local POINTS_DIR = DATA_DIR .. 'points/'
-local JOURNAL_FILE = DATA_DIR .. 'livraisons.json'
-local JOURNAL_CSV = DATA_DIR .. 'livraisons.csv'
 local DECAL_TEXTURE = 'art/shapes/interface/parkDecalStripes.png'
-local HISTORY_MAX = 25
-local SWITCH_MIN_DIST = 500      -- en dessous, un véhicule abandonné n'est pas noté dans le journal
-local PERF_START_SPEED = 1.5     -- m/s : le chrono du trajet démarre à la première accélération
-local PERF_END_DIST = 50         -- m : il s'arrête à 50 m de la zone (le stationnement ne fausse pas la perf)
-local PARK_BRAKE_MIN = 0.15      -- frein à main serré à 15 % : suffit pour valider
-local CENTER_POST_HEIGHT = 2     -- m : trait vertical au centre de la place de livraison
-local SPEED_WINDOW = 8           -- échantillons pour lisser la vitesse (pics parasites)
-local MAX_PLAUSIBLE_SPEED = 140  -- m/s (~500 km/h) : au-delà, la mesure est ignorée
-local SUMMARY_DELAY = 0.9        -- s : délai après la fin du fondu avant d'afficher le résumé
-local POLICE_CLEAR_DIST = 100    -- m : police écartée en approche de la zone
-local ANALYSIS_BUDGET = 0.006    -- s de calcul par image pour l'analyse de la map (le jeu ne fige jamais)
-local ANALYSIS_TIMEOUT = 45      -- s : au-delà, l'analyse est abandonnée avec un message
-local ANALYSIS_FILE = DATA_DIR .. 'analyse.txt' -- étapes de la dernière analyse (diagnostic)
-local FFB_RELEASE_DELAY = 1.5    -- s après le retour de l'image avant de rendre le retour de force
+-- réglages internes (regroupés : le fichier approche la limite de 200 variables locales de Lua)
+local K = {}
+K.SETTINGS_FILE = DATA_DIR .. 'settings.json'
+K.STATS_FILE = DATA_DIR .. 'stats.json'
+K.POINTS_DIR = DATA_DIR .. 'points/'
+K.JOURNAL_FILE = DATA_DIR .. 'livraisons.json'
+K.JOURNAL_CSV = DATA_DIR .. 'livraisons.csv'
+K.HISTORY_MAX = 25
+K.SWITCH_MIN_DIST = 500      -- en dessous, un véhicule abandonné n'est pas noté dans le journal
+K.PERF_START_SPEED = 1.5     -- m/s : le chrono du trajet démarre à la première accélération
+K.PERF_END_DIST = 50         -- m : il s'arrête à 50 m de la zone (le stationnement ne fausse pas la perf)
+K.PARK_BRAKE_MIN = 0.15      -- frein à main serré à 15 % : suffit pour valider
+K.CENTER_POST_HEIGHT = 2     -- m : trait vertical au centre de la place de livraison
+K.SPEED_WINDOW = 8           -- échantillons pour lisser la vitesse (pics parasites)
+K.MAX_PLAUSIBLE_SPEED = 140  -- m/s (~500 km/h) : au-delà, la mesure est ignorée
+K.SUMMARY_DELAY = 0.9        -- s : délai après la fin du fondu avant d'afficher le résumé
+K.POLICE_CLEAR_DIST = 100    -- m : police écartée en approche de la zone
+K.ANALYSIS_BUDGET = 0.006    -- s de calcul par image pour l'analyse de la map (le jeu ne fige jamais)
+K.ANALYSIS_TIMEOUT = 45      -- s : au-delà, l'analyse est abandonnée avec un message
+K.ANALYSIS_FILE = DATA_DIR .. 'analyse.txt' -- étapes de la dernière analyse (diagnostic)
+K.FFB_RELEASE_DELAY = 1.5    -- s après le retour de l'image avant de rendre le retour de force
 
 local abs, min, max, sqrt, floor = math.abs, math.min, math.max, math.sqrt, math.floor
 
@@ -247,8 +249,8 @@ local function writeJson(path, data)
   return ok
 end
 
-local function saveSettings() writeJson(SETTINGS_FILE, settings) end
-local function saveStats() writeJson(STATS_FILE, stats) end
+local function saveSettings() writeJson(K.SETTINGS_FILE, settings) end
+local function saveStats() writeJson(K.STATS_FILE, stats) end
 
 local function writeText(path, text)
   local ok = false
@@ -263,25 +265,25 @@ local function writeText(path, text)
 end
 
 local function saveJournal()
-  writeJson(JOURNAL_FILE, {version = 1, records = journalRecords})
-  writeText(JOURNAL_CSV, journal.toCsv(journalRecords))
+  writeJson(K.JOURNAL_FILE, {version = 1, records = journalRecords})
+  writeText(K.JOURNAL_CSV, journal.toCsv(journalRecords))
 end
 
 local function loadData()
   settings = copyTable(DEFAULTS)
-  local saved = jsonReadFile(SETTINGS_FILE)
+  local saved = jsonReadFile(K.SETTINGS_FILE)
   if type(saved) == 'table' then mergeInto(settings, saved, DEFAULTS) end
   sanitizeSettings(settings)
 
   stats = copyTable(STATS_DEFAULTS)
-  local savedStats = jsonReadFile(STATS_FILE)
+  local savedStats = jsonReadFile(K.STATS_FILE)
   if type(savedStats) == 'table' then
     for k, v in pairs(savedStats) do stats[k] = v end
     if type(stats.history) ~= 'table' then stats.history = {} end
   end
 
   journalRecords, journalSeq = {}, 0
-  local j = jsonReadFile(JOURNAL_FILE)
+  local j = jsonReadFile(K.JOURNAL_FILE)
   if type(j) == 'table' and type(j.records) == 'table' then
     for _, r in ipairs(j.records) do
       if type(r) == 'table' then
@@ -332,7 +334,7 @@ end
 ---------------------------------------------------------------------------
 -- points de livraison perso
 ---------------------------------------------------------------------------
-local function pointsFile(lvl) return POINTS_DIR .. lvl .. '.json' end
+local function pointsFile(lvl) return K.POINTS_DIR .. lvl .. '.json' end
 
 local function getPoints(lvl)
   lvl = lvl or levelName()
@@ -347,7 +349,7 @@ end
 local function savePoints(lvl)
   lvl = lvl or levelName()
   if not lvl then return end
-  ensureDir(POINTS_DIR)
+  ensureDir(K.POINTS_DIR)
   writeJson(pointsFile(lvl), {version = 1, level = lvl, points = getPoints(lvl)})
   if levelData and levelData.name == lvl then
     levelData.customCands = locLib.attachCustom(levelData.g, getPoints(lvl))
@@ -378,7 +380,7 @@ local traceBuf, traceT0 = {}, 0
 local function traceWrite()
   pcall(function()
     ensureDir(DATA_DIR)
-    if writeFile then writeFile(ANALYSIS_FILE, table.concat(traceBuf, '\n') .. '\n') end
+    if writeFile then writeFile(K.ANALYSIS_FILE, table.concat(traceBuf, '\n') .. '\n') end
   end)
 end
 local function traceStart(lvl)
@@ -558,8 +560,8 @@ local function analyzeLevel(cb)
   analysis = a
   local function tick()
     local now = os.clock()
-    if now - a.t0 > ANALYSIS_TIMEOUT then error('LL_ANALYSIS_TIMEOUT : plus de ' .. ANALYSIS_TIMEOUT .. ' s pendant « ' .. tostring(a.step) .. ' »', 0) end
-    if now - a.frameStart > ANALYSIS_BUDGET then coroutine.yield() end
+    if now - a.t0 > K.ANALYSIS_TIMEOUT then error('LL_ANALYSIS_TIMEOUT : plus de ' .. K.ANALYSIS_TIMEOUT .. ' s pendant « ' .. tostring(a.step) .. ' »', 0) end
+    if now - a.frameStart > K.ANALYSIS_BUDGET then coroutine.yield() end
   end
   traceStart(lvl)
   a.co = coroutine.create(function()
@@ -962,7 +964,7 @@ end
 local function closeSegment()
   local m = S and S.m
   if not m or not S.info then return end
-  if m.segDist >= SWITCH_MIN_DIST then
+  if m.segDist >= K.SWITCH_MIN_DIST then
     m.used[#m.used + 1] = {name = S.info.name, dist = m.segDist}
     m.switches = m.switches + 1
   end
@@ -1024,7 +1026,7 @@ local function recordMission(result, reason)
     resets = m.resets, switches = m.switches, traffic = ts.active, level = levelName(), date = os.date('%d/%m %H:%M'),
     maxStars = m.maxStars or 0, pursuitTime = m.pursuitTime or 0,
   })
-  while #stats.history > HISTORY_MAX do table.remove(stats.history) end
+  while #stats.history > K.HISTORY_MAX do table.remove(stats.history) end
   return rec
 end
 
@@ -1142,9 +1144,20 @@ local function stopSession(silent)
   if not silent then sendState() end
 end
 
+-- Derniers lieux de départ et d'arrivée sur cette map (évités pour les livraisons suivantes, tant qu'il y en
+-- a d'autres) ; gardés si on arrête puis relance les livraisons, oubliés au changement de map
+local recent = {max = 10, places = {}, level = nil}
+function recent.remember(c)
+  if not c or not c.x then return end
+  if recent.level ~= levelName() then recent.places, recent.level = {}, levelName() end
+  table.insert(recent.places, 1, {x = c.x, y = c.y})
+  while #recent.places > recent.max do table.remove(recent.places) end
+end
+
 local function planMission(w, l, fromHere)
   local ld, err = buildLevel()
   if not ld then return nil, err end
+  if recent.level ~= ld.name then recent.places, recent.level = {}, ld.name end
   local ctx = {
     g = ld.g,
     minD = settings.minDist, maxD = settings.maxDist,
@@ -1153,6 +1166,7 @@ local function planMission(w, l, fromHere)
     filter = locFilter(),
     isFree = isZoneFree,
     exclude = (S and S.dest) and {[S.dest.id] = true} or nil,
+    avoid = recent.places,
   }
   if settings.locMode == 'custom' then
     ctx.customMode = true
@@ -1275,6 +1289,8 @@ local function beginDriving()
     quiet = true
   else
     S.elapsed = 0
+    recent.remember(plan.pickup)
+    recent.remember(plan.dest)
     -- trajet gardé : la difficulté peut encore changer tant que le chrono n'est pas lancé
     S.timePlan = {pickup = plan.pickup, from = plan.from, dest = plan.dest}
     S.timeLimit = settings.timeLimit and computeTimeLimit(plan) or nil
@@ -1313,8 +1329,8 @@ local function beginDriving()
   setRoute()
   createMarker()
   endFade()
-  if next(ffbHeld) then S.ffbRelease = FFB_RELEASE_DELAY end
-  if S.pendingSummary then S.summaryDelay = SUMMARY_DELAY end
+  if next(ffbHeld) then S.ffbRelease = K.FFB_RELEASE_DELAY end
+  if S.pendingSummary then S.summaryDelay = K.SUMMARY_DELAY end
   S.message = nil
   if S.relaxed and S.kindsRelaxed then
     S.message = 'Aucun lieu du type choisi à cette distance : destination la plus proche, autre type de lieu.'
@@ -1649,25 +1665,25 @@ local function updateMetrics(veh, vid, dtReal, dtSim)
   -- frames (reset, récupération, gros choc) qui faussaient la vitesse max
   local w = m.speedWin
   w[#w + 1] = speed
-  if #w > SPEED_WINDOW then table.remove(w, 1) end
+  if #w > K.SPEED_WINDOW then table.remove(w, 1) end
   local steady = speed
   for i = 1, #w do if w[i] < steady then steady = w[i] end end
   if (S.elapsed or 0) >= (m.ignoreUntil or 0) then
     local useSpeed = min(speed, steady + 2)
-    if useSpeed > 0.2 and useSpeed < MAX_PLAUSIBLE_SPEED then
+    if useSpeed > 0.2 and useSpeed < K.MAX_PLAUSIBLE_SPEED then
       local d = useSpeed * dtSim
       m.odo = m.odo + d
       m.segDist = m.segDist + d
     end
-    if #w >= SPEED_WINDOW and steady > m.vmax and steady < MAX_PLAUSIBLE_SPEED then m.vmax = steady end
+    if #w >= K.SPEED_WINDOW and steady > m.vmax and steady < K.MAX_PLAUSIBLE_SPEED then m.vmax = steady end
   end
   speed = steady
   if (m.stars or 0) > 0 then m.pursuitTime = m.pursuitTime + dtSim end -- temps "survécu" aux étoiles
-  if not m.moveAt and speed > PERF_START_SPEED then
+  if not m.moveAt and speed > K.PERF_START_SPEED then
     m.moveAt = S.elapsed
     m.odoAtMove = m.odo
   end
-  if m.moveAt and not m.nearAt and S.zoneDist < PERF_END_DIST then
+  if m.moveAt and not m.nearAt and S.zoneDist < K.PERF_END_DIST then
     m.nearAt = S.elapsed
     m.odoAtNear = m.odo
   end
@@ -1737,12 +1753,12 @@ local function updateDriving(dtReal, dtSim)
     if S.m.maxStars < 1 then S.m.maxStars = 1 end
     toast('warn', 'Tu as percuté la police : 1 étoile !')
   end
-  if settings.traffic.clearPoliceNearEnd and S.zoneDist < POLICE_CLEAR_DIST then
+  if settings.traffic.clearPoliceNearEnd and S.zoneDist < K.POLICE_CLEAR_DIST then
     S.policeClearTimer = (S.policeClearTimer or 0) - dtReal
     if S.policeClearTimer <= 0 then
       S.policeClearTimer = 1
       S.wanted, S.wasWanted = nil, nil -- pas de nouvelle recherche une fois près de l'arrivée
-      trafficCtl.clearPoliceNear(vid, zone, POLICE_CLEAR_DIST * 3)
+      trafficCtl.clearPoliceNear(vid, zone, K.POLICE_CLEAR_DIST * 3)
     end
   end
 
@@ -1769,7 +1785,7 @@ local function updateDriving(dtReal, dtSim)
 
   local required = (settings.validation == 'auto') and 3.0 or (settings.instantNext and 0.25 or 0.6)
   local ok = S.inZone and S.speed < 0.5
-  if ok and settings.validation ~= 'auto' then ok = (S.parkBrake or 0) >= PARK_BRAKE_MIN end
+  if ok and settings.validation ~= 'auto' then ok = (S.parkBrake or 0) >= K.PARK_BRAKE_MIN end
   if ok then
     S.validateTimer = S.validateTimer + dtSim
   else
@@ -1804,7 +1820,7 @@ local function hudData()
     d.distLeft = rem
     d.progress = clamp(1 - rem / max(S.routeDist or 1, 1), 0, 1)
     d.inZone = S.inZone
-    d.parkBrake = (S.parkBrake or 0) >= PARK_BRAKE_MIN
+    d.parkBrake = (S.parkBrake or 0) >= K.PARK_BRAKE_MIN
     d.speedKmh = (S.speed or 0) * 3.6
     d.validate = S.validate
     d.near = S.zoneDist < 60
@@ -1895,7 +1911,7 @@ local function onPreRender(dtReal, dtSim, dtRaw)
 
   -- repère vertical de 2 m au centre de la place (même couleur que la zone)
   if settings.showCenterPost then pcall(function()
-    local base, top = vec3(zone.x, zone.y, zone.z), vec3(zone.x, zone.y, zone.z + CENTER_POST_HEIGHT)
+    local base, top = vec3(zone.x, zone.y, zone.z), vec3(zone.x, zone.y, zone.z + K.CENTER_POST_HEIGHT)
     debugDrawer:drawCylinder(base, top, 0.05, col)
     debugDrawer:drawSphere(top, 0.13, col)
   end) end
@@ -1931,6 +1947,7 @@ end
 local function onClientPostStartMission()
   levelData = nil
   analysis, startPending = nil, false
+  recent.places, recent.level = {}, nil -- nouvelle map chargée : on oublie les lieux récents
   analysisErrors = 0
   if S then stopSession(true) end
   trafficCtl.forget()
