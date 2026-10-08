@@ -280,6 +280,7 @@ function M.classify(cfg, model)
     perf = {
       top = tonumber(cfg['Top Speed']), z100 = tonumber(cfg['0-100 km/h']), power = tonumber(cfg.Power),
       weight = tonumber(cfg.Weight), brakeG = tonumber(cfg['Braking G']), height = M.heightOf(bb),
+      drive = firstString(cfg.Drivetrain), cfgType = firstString(cfg['Config Type']), offroad = tonumber(cfg['Off-Road Score']),
     },
   }
 end

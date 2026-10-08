@@ -120,6 +120,7 @@ local function newVeh(model, config, pos, rot)
   function v:getPosition() return vec3(self.pos) end
   function v:getVelocityXYZ() return self.vel.x, self.vel.y, self.vel.z end
   function v:getDirectionVector() return vec3(self.dir) end
+  function v:getDirectionVectorUp() return vec3(self.up) end
   function v:queueLuaCommand(cmd) table.insert(env.vluaCmds, {veh = self, cmd = cmd}) end
   function v:delete()
     env.vehicles[self.id] = nil

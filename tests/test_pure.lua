@@ -386,9 +386,201 @@ for _, route in ipairs({straight(3000, 22), winding(3000, 22)}) do
   check(smooth, 'écart régulier d un niveau à l autre')
 end
 
+print('-- carrefours, ville et trafic')
+-- même trajet avec des carrefours tous les 100 m (ville), tous les 600 m (campagne) ou aucun
+local function withJunctions(pts, every)
+  local out = {}
+  for i, p in ipairs(pts) do
+    out[i] = {x = p.x, y = p.y, z = p.z, speed = p.speed, drv = p.drv, r = p.r,
+      deg = (every and i > 1 and i < #pts and ((i - 1) * 50) % every == 0) and 3 or 2}
+  end
+  return out
+end
+local plain, town, rural = withJunctions(straight(3000, 15)), withJunctions(straight(3000, 15), 100), withJunctions(straight(3000, 15), 600)
+for _, L in ipairs(timing.LEVELS) do
+  local tp, tt, tr = timing.estimate(plain, sedan, L.id), timing.estimate(town, sedan, L.id), timing.estimate(rural, sedan, L.id)
+  check(tt > tp * 1.05, 'ville (carrefour tous les 100 m) : plus lent (' .. L.id .. ')', string.format('%.0f / %.0f s', tp, tt))
+  check(math.abs(tr - tp) < 0.01, 'carrefours isolés à la campagne : pas de ralentissement (' .. L.id .. ')', string.format('%.1f / %.1f s', tp, tr))
+  local tTraffic = timing.estimate(town, sedan, L.id, {traffic = 1})
+  check(tTraffic > tt, 'trafic : plus lent en ville (carrefours) (' .. L.id .. ')', string.format('%.0f / %.0f s', tt, tTraffic))
+  local tPlainTraffic = timing.estimate(plain, sedan, L.id, {traffic = 1})
+  if L.id == 'tres_facile' then
+    check(math.abs(tPlainTraffic - tp) < 0.01, 'trafic : pas plus vite que les voitures, pas gêné (' .. L.id .. ')', string.format('%.1f / %.1f s', tp, tPlainTraffic))
+  elseif L.limit > 1 then
+    check(tPlainTraffic > tp, 'trafic : on rattrape les voitures, plus lent (' .. L.id .. ')', string.format('%.1f / %.1f s', tp, tPlainTraffic))
+  else
+    check(tPlainTraffic >= tp, 'trafic : jamais plus rapide (' .. L.id .. ')')
+  end
+end
+-- passer entre les voitures ou se rabattre : largeur des voies, du véhicule, et une vraie marge
+check(timing.trafficBlock(7, 2, false, 1.9, false) > timing.trafficBlock(12, 2, false, 1.9, false), 'route large : on passe entre les voitures')
+check(timing.trafficBlock(11, 2, false, 1.9, false) < timing.trafficBlock(11, 2, false, 2.55, false), 'même route : une voiture passe, un bus non')
+check(timing.trafficBlock(7.8, 2, false, 1.9, false) > timing.trafficBlock(7.8, 2, false, 0.9, false), 'petit véhicule : passe plus souvent')
+do
+  -- ça passerait à 1 mm près : non, il faut la marge
+  local tight = (2.0 + 1.9 + 0.001) * 2          -- l'écart entre les deux voitures = le véhicule + 1 mm
+  local roomy = (2.0 + 1.9 + 2 * 0.5 + 0.001) * 2 -- le véhicule + 50 cm de chaque côté
+  check(timing.trafficBlock(tight, 2, false, 1.9, false) > timing.trafficBlock(roomy, 2, false, 1.9, false), 'pas de passage au millimètre : il faut une marge de chaque côté')
+end
+check(timing.trafficBlock(14, 4, false, 1.9, false) < timing.trafficBlock(7, 2, false, 1.9, false), 'deux voies dans son sens : on double en changeant de voie')
+check(timing.trafficBlock(4, 1, true, 1.9, false) > timing.trafficBlock(7, 2, false, 1.9, false), 'sens unique à une voie : coincé derrière')
+check(timing.trafficBlock(7, 2, false, 1.9, true) > timing.trafficBlock(7, 2, false, 1.9, false), 'en ville : plus de voitures en face, on double moins')
+check(timing.trafficBlock(7, 0, false, 1.9, false) == timing.trafficBlock(7, 2, false, 1.9, false), 'nombre de voies inconnu : déduit de la largeur')
+do
+  local function laned(pts, r, lanes)
+    local out = widened(pts, r)
+    for _, p in ipairs(out) do p.lanes = lanes end
+    return out
+  end
+  local narrow = laned(straight(3000, 15), 3.5, 2) -- 7 m, deux voies : on se rabat
+  local wide = laned(straight(3000, 15), 5.5, 2)   -- 11 m, deux voies : une voiture passe entre, un véhicule de 2,6 m non
+  local function loss(pts, vehW)
+    return timing.estimate(pts, sedan, 'tres_dur', {traffic = 1, vehW = vehW}) / timing.estimate(pts, sedan, 'tres_dur')
+  end
+  check(loss(wide, 1.9) < loss(narrow, 1.9), 'trafic : moins de temps perdu sur une route assez large pour passer', string.format('%.3f / %.3f', loss(wide, 1.9), loss(narrow, 1.9)))
+  check(loss(wide, 2.6) > loss(wide, 1.9), 'trafic : un véhicule large perd plus de temps', string.format('%.3f / %.3f', loss(wide, 2.6), loss(wide, 1.9)))
+end
+check(timing.trafficDensity(0) == 0 and timing.trafficDensity(nil) == 0 and timing.trafficDensity(0 / 0) == 0, 'pas de trafic : densité 0')
+check(timing.trafficDensity(10) == 1 and timing.trafficDensity(5) == 0.5 and timing.trafficDensity(200) == 1.5, 'densité selon le nombre de véhicules (plafonnée)')
+-- toujours un niveau plus dur = moins de temps, en ville et avec du trafic
+do
+  local bad
+  for _, veh in ipairs({{'sport', sports}, {'berline', sedan}, {'bus', bus}}) do
+    for _, every in ipairs({100, 150, 600}) do
+      for _, traffic in ipairs({0, 1, 1.5}) do
+        local pts = withJunctions(winding(4000, 14), every)
+        local prev
+        for _, L in ipairs(timing.LEVELS) do
+          local t = timing.estimate(pts, veh[2], L.id, {traffic = traffic})
+          if prev and t > prev + 1e-6 then bad = bad or string.format('%s %d m trafic %.1f %s', veh[1], every, traffic, L.id) end
+          prev = t
+        end
+      end
+    end
+  end
+  check(bad == nil, 'en ville et avec trafic : niveau plus dur = jamais plus de temps', bad)
+end
+-- chrono jusqu'à la validation
+check(timing.fullChrono('tres_dur') and timing.fullChrono('impossible'), 'très difficile et impossible : chrono jusqu à la validation')
+check(not timing.fullChrono('dur') and not timing.fullChrono('moyen') and not timing.fullChrono('n_importe_quoi'), 'autres niveaux : non (sauf option)')
+do
+  local ok, prev = true, nil
+  for _, L in ipairs(timing.LEVELS) do
+    local p = timing.parkTime(L.id)
+    if p <= 5 or (prev and p > prev) then ok = false end
+    prev = p
+  end
+  check(ok, 'temps de stationnement : plus court quand la difficulté monte')
+end
+check(timing.parkTime('dur', true) > timing.parkTime('dur', false), 'validation automatique : temps d attente compté')
+
+print('-- pentes')
+-- pente constante le long de la route (altitude = pente x distance parcourue)
+local function sloped(pts, grade)
+  local out, s = {}, 0
+  for i, p in ipairs(pts) do
+    if i > 1 then s = s + math.sqrt((p.x - pts[i - 1].x) ^ 2 + (p.y - pts[i - 1].y) ^ 2) end
+    out[i] = {x = p.x, y = p.y, z = s * grade, speed = p.speed, drv = p.drv, r = p.r}
+  end
+  return out
+end
+do
+  local flat8, up8 = straight(3000, 22), sloped(straight(3000, 22), 0.08)
+  local okBus, okSedan = true, true
+  for _, L in ipairs(timing.LEVELS) do
+    if not (timing.estimate(up8, bus, L.id) > timing.estimate(flat8, bus, L.id) * 1.02) then okBus = false end
+    if timing.estimate(up8, sedan, L.id) < timing.estimate(flat8, sedan, L.id) - 1e-6 then okSedan = false end
+  end
+  check(okBus, 'côte de 8 % : un bus monte nettement moins vite')
+  check(okSedan, 'côte de 8 % : jamais plus rapide qu à plat')
+  local lossBus = timing.estimate(up8, bus, 'dur') / timing.estimate(flat8, bus, 'dur')
+  local lossSport = timing.estimate(up8, sports, 'dur') / timing.estimate(flat8, sports, 'dur')
+  check(lossBus > lossSport, 'côte : un véhicule peu puissant perd plus qu une sportive', string.format('%.2f / %.2f', lossBus, lossSport))
+  -- côte trop raide pour le moteur : on monte quand même, au pas
+  local wall = sloped(straight(500, 22), 0.30)
+  local tw = timing.estimate(wall, bus, 'moyen')
+  check(tw and tw < math.huge and tw > timing.estimate(straight(500, 22), bus, 'moyen'), 'côte très raide : temps fini (au pas), plus long qu à plat', tw)
+  check(tw < 500 / 4 * 1.3 * timing.byId.moyen.margin, 'côte très raide : jamais plus lent que le pas', tw)
+  -- descente raide et sinueuse : prudence et freinages plus longs
+  local wf, wd = winding(3000, 22), sloped(winding(3000, 22), -0.10)
+  check(timing.estimate(wd, sedan, 'tres_facile') > timing.estimate(wf, sedan, 'tres_facile') * 1.03, 'descente raide : un débutant lève le pied')
+  check(timing.estimate(wd, sedan, 'dur') > timing.estimate(wf, sedan, 'dur'), 'descente raide et virages : freinages plus longs')
+  -- donnée aberrante (saut de 100 m d'altitude en 5 m) : pente plafonnée, pas de temps absurde
+  local spike = straight(1000, 22)
+  spike[10].z = 100
+  local ts, tf0 = timing.estimate(spike, sedan, 'moyen'), timing.estimate(straight(1000, 22), sedan, 'moyen')
+  check(ts and ts < tf0 * 2, 'pente aberrante plafonnée', string.format('%.0f / %.0f s', ts or -1, tf0))
+  -- toujours : niveau plus dur = moins de temps, en côte comme en descente
+  local bad
+  for _, veh in ipairs({{'sport', sports}, {'berline', sedan}, {'bus', bus}}) do
+    for _, grade in ipairs({-0.12, -0.06, 0.06, 0.12}) do
+      for _, shape in ipairs({straight, winding}) do
+        local pts = sloped(shape(3000, 20), grade)
+        local prev
+        for _, L in ipairs(timing.LEVELS) do
+          local t = timing.estimate(pts, veh[2], L.id, {traffic = 1})
+          if prev and t > prev + 1e-6 then bad = bad or string.format('%s pente %.2f %s', veh[1], grade, L.id) end
+          prev = t
+        end
+      end
+    end
+  end
+  check(bad == nil, 'en côte et en descente : niveau plus dur = jamais plus de temps', bad)
+end
+
+print('-- comportement du véhicule (drifteuse / accrocheuse)')
+do
+  local base = {top = 60, z100 = 5.5, brakeG = 1.1, height = 1.35, power = 400, weight = 1500}
+  local function with(extra) local p = {} for k, v in pairs(base) do p[k] = v end for k, v in pairs(extra) do p[k] = v end return timing.vehicleModel(p, 'coupe') end
+  local awd, fwd, rwd = with({drive = 'AWD'}), with({drive = 'FWD'}), with({drive = 'RWD'})
+  local drift = with({drive = 'RWD', cfgType = 'Drift'})
+  local calm = timing.vehicleModel({top = 52, z100 = 10.9, brakeG = 1.07, height = 1.4, power = 124, weight = 1315, drive = 'FWD'}, 'berline')
+  check(awd.stab >= 0.95 and awd.share > rwd.share, '4 roues motrices : accroche, meilleure motricité', awd.stab)
+  check(rwd.stab < fwd.stab and rwd.stab < awd.stab, 'propulsion puissante : glisse plus', string.format('%.2f / %.2f / %.2f', awd.stab, fwd.stab, rwd.stab))
+  check(drift.stab <= 0.72 and drift.stab < rwd.stab + 1e-9, 'config de drift : glisse', drift.stab)
+  check(calm.stab > 0.95, 'petite traction : stable', calm.stab)
+  local twisty, line = winding(3000, 22), straight(3000, 22)
+  for _, lvl in ipairs({'dur', 'impossible'}) do
+    local tA, tR, tD = timing.estimate(twisty, awd, lvl), timing.estimate(twisty, rwd, lvl), timing.estimate(twisty, drift, lvl)
+    check(tA < tR and tR <= tD, 'routes sinueuses : 4 roues motrices > propulsion > drift (' .. lvl .. ')', string.format('%.0f / %.0f / %.0f s', tA, tR, tD))
+    local sA, sR = timing.estimate(line, awd, lvl), timing.estimate(line, rwd, lvl)
+    check(math.abs(sA - sR) / sA < 0.05, 'ligne droite : la transmission compte peu (' .. lvl .. ')', string.format('%.1f / %.1f s', sA, sR))
+  end
+  -- terre : les pneus tout-terrain gardent plus d'adhérence
+  local dirtRoad = {}
+  for i, p in ipairs(winding(3000, 15)) do dirtRoad[i] = {x = p.x, y = p.y, z = p.z, speed = p.speed, drv = 0.4, r = p.r} end
+  local road4x4 = with({drive = 'AWD', offroad = 80})
+  local roadCar = with({drive = 'AWD', offroad = 20})
+  check(timing.estimate(dirtRoad, road4x4, 'dur') < timing.estimate(dirtRoad, roadCar, 'dur'), 'terre : pneus tout-terrain plus rapides')
+  check(math.abs(timing.estimate(twisty, road4x4, 'dur') - timing.estimate(twisty, roadCar, 'dur')) < 1e-6, 'bitume : les pneus tout-terrain ne changent rien (adhérence déjà dans le freinage mesuré)')
+  -- freinage en plein virage : on ne freine pas à fond en tournant
+  check(timing.estimate(twisty, awd, 'impossible') > timing.estimate(twisty, {vt = awd.vt, A = awd.A, aBrk = awd.aBrk, aLat = awd.aLat, stab = 1, share = 5, dirt = awd.dirt}, 'impossible') - 1e-6,
+    'cercle d adhérence : jamais plus rapide qu un véhicule sans limite de motricité')
+end
+do
+  local vehLib = require('/lua/ge/extensions/livraisonLibre/vehicles')
+  local cls = vehLib.classify({model_key = 'x', key = 'drift', pcFilename = '/vehicles/x/drift.pc', Name = 'X drift', Drivetrain = 'RWD', ['Config Type'] = 'Drift', ['Off-Road Score'] = 25,
+    Power = 518, Weight = 1775, ['Top Speed'] = 54.6, ['0-100 km/h'] = 7.3, ['Braking G'] = 1.12}, {Type = 'Car', ['Body Style'] = 'Sedan'})
+  check(cls and cls.perf.drive == 'RWD' and cls.perf.cfgType == 'Drift' and cls.perf.offroad == 25, 'fiche du véhicule : transmission, type de config, score tout-terrain lus',
+    cls and string.format('%s / %s / %s', tostring(cls.perf.drive), tostring(cls.perf.cfgType), tostring(cls.perf.offroad)))
+end
+
 print('-- trajet routier (graph.route)')
 local gr = graph.build((citygen.city(9, 120)))
 local spots = loc.buildRoadSpots(gr)
+print('-- carrefours dans le trajet')
+do
+  local found = false
+  for i = 1, 20 do
+    local a, b = spots[(i * 7) % #spots + 1], spots[(i * 13 + 5) % #spots + 1]
+    local pts = graph.route(gr, a, b)
+    if pts then
+      for k = 2, #pts - 1 do if (pts[k].deg or 0) >= 3 then found = true end end
+    end
+  end
+  check(found, 'graph.route : carrefours repérés (noeuds où 3 routes ou plus se rejoignent)')
+end
+
 local okRoutes, linked = 0, 0
 for i = 1, 30 do
   local a, b = spots[(i * 7) % #spots + 1], spots[(i * 13) % #spots + 1]

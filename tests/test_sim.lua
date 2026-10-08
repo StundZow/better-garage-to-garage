@@ -789,9 +789,10 @@ M.stop()
 M.setSettings({timeLimit = false, minDist = 300, autoNext = true})
 
 print('-- v1.6 : temps limite selon la difficulté')
+-- (jusqu'à Difficile : à partir de Très difficile le temps compte aussi le stationnement)
 local limits = {}
-for _, lvl in ipairs({'tres_facile', 'moyen', 'impossible'}) do
-  M.setSettings({timeLimit = true, timeLevel = lvl, autoNext = false, instantNext = false, traffic = {mode = 'keep', police = 'off'}})
+for _, lvl in ipairs({'tres_facile', 'moyen', 'dur'}) do
+  M.setSettings({timeLimit = true, timeLevel = lvl, minDist = 600, autoNext = false, instantNext = false, traffic = {mode = 'keep', police = 'off'}})
   math.randomseed(4242)
   M.start()
   frames(400)
@@ -807,8 +808,8 @@ for _, lvl in ipairs({'tres_facile', 'moyen', 'impossible'}) do
   end
   M.stop()
 end
-check(limits.tres_facile > limits.moyen and limits.moyen > limits.impossible, 'même livraison : moins de temps quand la difficulté monte',
-  string.format('%.0f / %.0f / %.0f s', limits.tres_facile or -1, limits.moyen or -1, limits.impossible or -1))
+check(limits.tres_facile > limits.moyen and limits.moyen > limits.dur, 'même livraison : moins de temps quand la difficulté monte',
+  string.format('%.0f / %.0f / %.0f s', limits.tres_facile or -1, limits.moyen or -1, limits.dur or -1))
 M.setSettings({timeLimit = false, timeLevel = 'moyen', autoNext = true})
 
 print('-- v1.7 : difficulté modifiable tant que le chrono n est pas lancé')
@@ -856,6 +857,91 @@ check(sess().timeLimit == tLocked and sess().timeLevelId == 'tres_facile', 'apr�
 M.stop()
 M.setSettings({timeLimit = false, timeLevel = 'moyen', minDist = 300, autoNext = true})
 
+print('-- v1.7.1 : chrono jusqu à la validation (très difficile et plus, ou option)')
+M.setSettings({timeLimit = true, timeLevel = 'tres_dur', fullChrono = false, minDist = 600, autoNext = false, instantNext = false, validation = 'handbrake', traffic = {mode = 'keep', police = 'off'}})
+M.start()
+frames(400)
+check(sess() and sess().phase == 'driving' and sess().fullChrono == true, 'très difficile : chrono jusqu à la validation')
+drive(300, 15)
+frames(2)
+parkInZone(0)
+frames(60)
+check(hud().chronoState == 'running', 'le chrono tourne pendant le stationnement', hud().chronoState)
+local left1 = hud().timeLeft
+frames(120)
+check(hud().timeLeft < left1 - 1.5, 'le temps restant baisse pendant le stationnement', string.format('%.1f -> %.1f', left1, hud().timeLeft))
+getPlayerVehicle(0).parkbrake = 1
+frames(90)
+getPlayerVehicle(0).parkbrake = 0
+check(sess().phase == 'summary' and lastRec().result == 'Livrée', 'livrée (chrono jusqu à la validation)')
+local rec = lastRec()
+check(type(rec.timeLeftS) == 'number' and rec.timeS < (rec.timeLimitS - rec.timeLeftS) - 1,
+  'journal : temps de trajet sans le stationnement, temps limite avec', string.format('%s / %s - %s', tostring(rec.timeS), tostring(rec.timeLimitS), tostring(rec.timeLeftS)))
+M.stop()
+M.setSettings({timeLevel = 'moyen'})
+M.start()
+frames(400)
+check(sess().fullChrono == false, 'moyen : chrono arrêté à 50 m de la zone')
+drive(300, 15)
+frames(2)
+parkInZone(0)
+frames(60)
+check(hud().chronoState == 'stopped', 'moyen : chrono arrêté près de la zone', hud().chronoState)
+M.stop()
+M.setSettings({fullChrono = true})
+M.start()
+frames(400)
+check(sess().fullChrono == true, 'option avancée : chrono jusqu à la validation aussi en moyen')
+drive(300, 15)
+frames(2)
+parkInZone(0)
+frames(60)
+check(hud().chronoState == 'running', 'option : le chrono tourne pendant le stationnement', hud().chronoState)
+M.stop()
+check(env.files['/settings/livraisonLibre/settings.json'].fullChrono == true, 'option gardée dans les réglages')
+M.setSettings({timeLimit = false, fullChrono = false, timeLevel = 'moyen', minDist = 300, autoNext = true})
+
+print('-- v1.7.1 : demi-tour avant le départ')
+M.setSettings({timeLimit = false, autoNext = false, instantNext = false, traffic = {mode = 'keep', police = 'off'}})
+M.start()
+frames(400)
+local fv = getPlayerVehicle(0)
+local d0 = vec3(fv.dir)
+local r0 = hud().resets
+M.flipVehicle()
+frames(5)
+local dd = fv.dir.x * d0.x + fv.dir.y * d0.y + fv.dir.z * d0.z
+check(dd < -0.99, 'demi-tour : véhicule tourné dans l autre sens', dd)
+check(hud().chronoState == 'wait' and hud().resets == r0, 'demi-tour : ni départ du chrono, ni remise en place comptée')
+-- une fois parti : plus de demi-tour
+fv.pos = vec3(-3000, -3000, 10)
+fv.vel = vec3(15, 0, 0)
+frames(60)
+fv.vel = vec3(0, 0, 0)
+local d1 = vec3(fv.dir)
+M.flipVehicle()
+frames(5)
+check(hud().chronoState ~= 'wait' and fv.dir.x * d1.x + fv.dir.y * d1.y > 0.99, 'après le départ : plus de demi-tour')
+M.stop()
+M.setSettings({autoNext = true})
+
+print('-- v1.7.1 : frein à main serré à 15 % : validé')
+M.setSettings({timeLimit = false, autoNext = false, instantNext = false, validation = 'handbrake', traffic = {mode = 'keep', police = 'off'}})
+M.start()
+frames(400)
+drive(300, 15)
+frames(2)
+parkInZone(0)
+getPlayerVehicle(0).parkbrake = 0.1
+frames(90)
+check(sess().phase == 'driving', 'frein à main à 10 % : pas encore validé')
+getPlayerVehicle(0).parkbrake = 0.15
+frames(90)
+getPlayerVehicle(0).parkbrake = 0
+check(sess().phase == 'summary', 'frein à main à 15 % : livraison validée', sess().phase)
+M.stop()
+M.setSettings({autoNext = true})
+
 print('-- relecture complète du mod : corrections')
 -- police du jeu : ses réglages sont remis comme avant à l'arrêt, même en « Ne pas toucher »
 env.policeVars = {strictness = 0.7, suspectFrequency = 0.5}
@@ -886,6 +972,7 @@ table.insert(env.configs, cfg('broken', 'base'))
 M.onModActivated()
 M.start()
 frames(400)
+M.onModActivated() -- (si le tout premier tirage est tombé dessus, il a été écarté : on l'oublie pour le test)
 local hitBroken, keptVeh = false, nil
 for _ = 1, 60 do
   if not sess() then break end

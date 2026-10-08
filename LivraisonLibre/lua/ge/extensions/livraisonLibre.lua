@@ -13,7 +13,7 @@ local trafficCtl = require('/lua/ge/extensions/livraisonLibre/trafficCtl')
 local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 local timing = require('/lua/ge/extensions/livraisonLibre/timing')
 
-local VERSION = '1.7.0'
+local VERSION = '1.7.1'
 local DATA_DIR = '/settings/livraisonLibre/'
 local SETTINGS_FILE = DATA_DIR .. 'settings.json'
 local STATS_FILE = DATA_DIR .. 'stats.json'
@@ -25,6 +25,7 @@ local HISTORY_MAX = 25
 local SWITCH_MIN_DIST = 500      -- en dessous, un véhicule abandonné n'est pas noté dans le journal
 local PERF_START_SPEED = 1.5     -- m/s : le chrono du trajet démarre à la première accélération
 local PERF_END_DIST = 50         -- m : il s'arrête à 50 m de la zone (le stationnement ne fausse pas la perf)
+local PARK_BRAKE_MIN = 0.15      -- frein à main serré à 15 % : suffit pour valider
 local CENTER_POST_HEIGHT = 2     -- m : trait vertical au centre de la place de livraison
 local SPEED_WINDOW = 8           -- échantillons pour lisser la vitesse (pics parasites)
 local MAX_PLAUSIBLE_SPEED = 140  -- m/s (~500 km/h) : au-delà, la mesure est ignorée
@@ -53,6 +54,7 @@ local DEFAULTS = {
   fade = true,
   timeLimit = false,
   timeLevel = 'moyen',           -- difficulté du temps limite (très facile -> impossible)
+  fullChrono = false,            -- temps limite jusqu'à la validation (stationnement compris) ; toujours en très difficile+
   avgSpeedKmh = 45,
   timeBonus = 60,
   randomPaint = true,
@@ -817,6 +819,11 @@ local function candInfo(c)
   return {kind = c.kind, kindLabel = KIND_LABEL[c.kind] or '', label = c.label or KIND_LABEL[c.kind] or 'Destination'}
 end
 
+-- chrono jusqu'à la validation (stationnement compris) : toujours à partir de Très difficile, en option sinon
+local function fullChronoFor(level)
+  return timing.fullChrono(level) or settings.fullChrono == true
+end
+
 local function sessionInfo()
   if not S then return nil end
   local info = S.info
@@ -836,6 +843,7 @@ local function sessionInfo()
     timeLimit = S.timeLimit,
     timeLevel = S.timeLevel and timing.byId[S.timeLevel] and timing.byId[S.timeLevel].label or nil,
     timeLevelId = S.timeLevel,
+    fullChrono = (S.timeLimit and S.timeLevel and fullChronoFor(S.timeLevel)) and true or false,
     police = S.policeCtl and {mode = S.policeMode, level = settings.traffic.wantedLevel} or nil,
     summary = S.summary,
     message = S.message,
@@ -925,6 +933,18 @@ local function perfTime()
   return max(0, (m.nearAt or S.elapsed or 0) - m.moveAt)
 end
 
+-- temps compté pour le temps limite : jusqu'à 50 m de la zone, ou jusqu'à la validation
+local function isFullChrono()
+  return (S and S.timeLimit and S.timeLevel and fullChronoFor(S.timeLevel)) and true or false
+end
+
+local function limitTime()
+  local m = S and S.m
+  if not m or not m.moveAt then return 0 end
+  if isFullChrono() then return max(0, (S.elapsed or 0) - m.moveAt) end
+  return perfTime()
+end
+
 local function perfDist()
   local m = S and S.m
   if not m or not m.moveAt then return 0 end
@@ -987,7 +1007,7 @@ local function recordMission(result, reason)
     traffic = ts.active, trafficCount = ts.amount, parkedCount = ts.parked, police = police,
     pursuits = m.pursuits, arrests = m.arrests, maxStars = m.maxStars, pursuitTime = m.pursuitTime,
     timeLimit = S.timeLimit,
-    timeLeft = (result == 'Livrée' and S.timeLimit) and max(0, S.timeLimit - perfTime()) or nil,
+    timeLeft = (result == 'Livrée' and S.timeLimit) and max(0, S.timeLimit - limitTime()) or nil,
     timeLevel = S.timeLevel and timing.byId[S.timeLevel] and timing.byId[S.timeLevel].label or nil,
     locMode = settings.locMode == 'custom' and 'Mes points' or 'Aléatoire',
     surface = settings.surface == 'paved' and 'Bitume' or 'Toutes routes',
@@ -1193,6 +1213,15 @@ local function placeZone(dirSign)
   S.zone = zone
 end
 
+-- Trafic pendant la livraison : nombre de véhicules (ceux du mod, ou ceux du jeu en « Ne pas toucher »)
+local function trafficAmount()
+  local t = settings.traffic
+  if t.mode == 'off' then return 0 end
+  if t.mode == 'on' then return trafficCtl.levelSupportsTraffic(levelName()) and (t.amount or 0) or 0 end
+  local st = trafficCtl.status()
+  return (st.state == 'on' and st.amount) or 0
+end
+
 -- Temps limite de la livraison : simulation du trajet avec ce véhicule, au niveau de difficulté choisi
 local function computeTimeLimit(plan, level)
   level = level or settings.timeLevel
@@ -1202,7 +1231,8 @@ local function computeTimeLimit(plan, level)
     local okR, pts = pcall(graphLib.route, levelData.g, from, plan.dest)
     if okR and pts then
       local info = S.info or {}
-      local okE, t = pcall(timing.estimate, pts, timing.vehicleModel(info.perf, info.mainCat), level)
+      local opts = {traffic = timing.trafficDensity(trafficAmount()), vehW = S.vehW or info.w}
+      local okE, t = pcall(timing.estimate, pts, timing.vehicleModel(info.perf, info.mainCat), level, opts)
       if okE and t then
         -- bouts hors route (parking, départ à l'écart de la route) : roulés lentement
         est = t + timing.access((tonumber(from.off) or 0) + (tonumber(plan.dest.off) or 0), level)
@@ -1210,6 +1240,8 @@ local function computeTimeLimit(plan, level)
     end
   end
   if not est then est = timing.fallback(S.routeDist, level) end
+  -- chrono jusqu'à la validation : les 50 derniers mètres et le stationnement comptent aussi
+  if fullChronoFor(level) then est = est + timing.parkTime(level, settings.validation == 'auto') end
   return max(20, est)
 end
 
@@ -1405,7 +1437,7 @@ local function summaryPayload(ok, reason, records)
   return {
     ok = ok, reason = reason, count = S.count, showFor = settings.summaryDuration,
     maxStars = m.maxStars or 0, policeActive = (m.policeSeen or (m.maxStars or 0) > 0) and true or false,
-    timeLeft = (ok and S.timeLimit) and max(0, S.timeLimit - perfTime()) or nil,
+    timeLeft = (ok and S.timeLimit) and max(0, S.timeLimit - limitTime()) or nil,
     timeLevel = S.timeLevel and timing.byId[S.timeLevel] and timing.byId[S.timeLevel].label or nil,
     pursuitTime = m.pursuitTime or 0,
     vehicle = info.name, brand = info.brand, preview = info.preview,
@@ -1737,7 +1769,7 @@ local function updateDriving(dtReal, dtSim)
 
   local required = (settings.validation == 'auto') and 3.0 or (settings.instantNext and 0.25 or 0.6)
   local ok = S.inZone and S.speed < 0.5
-  if ok and settings.validation ~= 'auto' then ok = (S.parkBrake or 0) >= 0.5 end
+  if ok and settings.validation ~= 'auto' then ok = (S.parkBrake or 0) >= PARK_BRAKE_MIN end
   if ok then
     S.validateTimer = S.validateTimer + dtSim
   else
@@ -1749,16 +1781,18 @@ local function updateDriving(dtReal, dtSim)
     return
   end
 
-  if S.timeLimit and perfTime() > S.timeLimit then
+  if S.timeLimit and limitTime() > S.timeLimit then
     failMission('Temps écoulé')
   end
 end
 
 local function hudData()
   local m = S.m
-  local d = {phase = S.phase, elapsed = perfTime(), total = S.elapsed, count = S.count}
-  d.chronoState = (not m or not m.moveAt) and 'wait' or (m.nearAt and 'stopped' or 'running')
-  if S.timeLimit then d.timeLeft = S.timeLimit - perfTime() end
+  local full = isFullChrono()
+  local d = {phase = S.phase, elapsed = full and limitTime() or perfTime(), total = S.elapsed, count = S.count}
+  -- (chrono jusqu'à la validation : il tourne aussi pendant le stationnement)
+  d.chronoState = (not m or not m.moveAt) and 'wait' or ((m.nearAt and not full) and 'stopped' or 'running')
+  if S.timeLimit then d.timeLeft = S.timeLimit - limitTime() end
   if S.phase == 'driving' and S.zone then
     local rem = 0
     local gm = core_groundMarkers
@@ -1770,7 +1804,7 @@ local function hudData()
     d.distLeft = rem
     d.progress = clamp(1 - rem / max(S.routeDist or 1, 1), 0, 1)
     d.inZone = S.inZone
-    d.parkBrake = (S.parkBrake or 0) >= 0.5
+    d.parkBrake = (S.parkBrake or 0) >= PARK_BRAKE_MIN
     d.speedKmh = (S.speed or 0) * 3.6
     d.validate = S.validate
     d.near = S.zoneDist < 60
@@ -2039,6 +2073,27 @@ function M.setMissionTimeLevel(level)
     S.timeLevel = level
     refreshTimeLimit()
   end
+  sendState()
+end
+
+-- Demi-tour sur place, avant le départ (véhicule posé dans le mauvais sens)
+function M.flipVehicle()
+  if not S or S.phase ~= 'driving' or (S.m and S.m.moveAt) then return end
+  local veh = S.vehId and getObjectByID(S.vehId)
+  if not veh then return end
+  local ok, err = pcall(function()
+    local dir = veh:getDirectionVector()
+    local up = veh.getDirectionVectorUp and veh:getDirectionVectorUp() or vec3(0, 0, 1)
+    local cx, cy, cz = be:getObjectOOBBCenterXYZ(S.vehId)
+    -- même endroit (centre du véhicule), sens opposé, posé au sol sans toucher les obstacles
+    spawn.safeTeleport(veh, vec3(cx, cy, cz), quatFromDir(vec3(-dir.x, -dir.y, -dir.z), up), nil, nil, nil, true)
+  end)
+  if not ok then
+    log('W', logTag, 'demi-tour impossible : ' .. tostring(err))
+    toast('warn', 'Demi-tour impossible ici.')
+    return
+  end
+  pauseMeasures(2) -- le replacement ne compte pas comme un départ (le chrono attend la vraie accélération)
   sendState()
 end
 

@@ -94,13 +94,16 @@
         </div>
         <div class="ll-progress"><div class="ll-progress-bar" ng-style="{width: ((hud.progress || 0) * 100) + '%'}"></div></div>
 
+        <!-- avant le départ : demi-tour sur place si le véhicule est dans le mauvais sens -->
+        <button class="ll-btn ll-btn-ghost ll-btn-small ll-flip" ng-if="sess.phase === 'driving' && hud.chronoState === 'wait'" ng-click="call('flipVehicle')" title="Tourner le véhicule dans l'autre sens, sur place (tant que tu n'as pas démarré)">↻ Retourner le véhicule</button>
+
         <!-- difficulté du temps : modifiable tant que le chrono n'est pas lancé -->
         <div class="ll-mtime" ng-if="sess.timeLevelId && hud.chronoState === 'wait'">
           <div class="ll-slider ll-lvl" ng-class="'ll-lvl-' + ui.mTimeIdx">
             <div class="ll-slider-head"><span>Difficulté du temps</span><b>{{ timeLevelLabel(ui.mTimeIdx) }}</b></div>
             <input type="range" min="0" max="5" step="1" ng-model="ui.mTimeIdx" ng-change="missionTimeLevel()">
           </div>
-          <div class="ll-hint">Modifiable jusqu'à ce que tu démarres.</div>
+          <div class="ll-hint">Modifiable jusqu'à ce que tu démarres.<span ng-if="ui.mTimeIdx >= 4 || state.settings.fullChrono"> Stationnement compris dans le temps.</span></div>
         </div>
 
         <div class="ll-stars ll-stars-on" ng-if="hud.stars > 0">
@@ -361,7 +364,8 @@
               <div class="ll-slider-head"><span>Niveau</span><b>{{ timeLevelLabel() }}</b></div>
               <input type="range" min="0" max="5" step="1" ng-model="ui.timeLevelIdx" ng-change="setTimeLevel()">
             </div>
-            <div class="ll-hint">Calculé à chaque livraison selon le véhicule et le trajet (virages, limitations, largeur de la route).</div>
+            <div class="ll-hint">Calculé à chaque livraison selon le véhicule (puissance, freinage, adhérence, comportement), le trajet (virages, carrefours, pentes, limitations, largeur de la route) et le trafic.</div>
+            <div class="ll-hint" ng-if="ui.timeLevelIdx >= 4">À ce niveau, le chrono tourne jusqu'à la validation : le stationnement compte.</div>
           </div>
         </div>
 
@@ -391,6 +395,11 @@
 
         <details class="ll-more">
           <summary>Plus d'options</summary>
+          <div class="ll-row" ng-if="s.timeLimit">
+            <div><div class="ll-row-title">Chrono jusqu'à la validation</div><div class="ll-hint">Le temps limite compte aussi le stationnement. Toujours le cas en Très difficile et Impossible.</div></div>
+            <label class="ll-switch" ng-if="ui.timeLevelIdx < 4"><input type="checkbox" ng-model="s.fullChrono" ng-change="push()"><span></span></label>
+            <span class="ll-pill" ng-if="ui.timeLevelIdx >= 4">Toujours</span>
+          </div>
           <div ng-if="s.traffic.mode === 'on'">
             <div class="ll-slider">
               <div class="ll-slider-head"><span>Véhicules en circulation</span><b>{{ s.traffic.amount }}</b></div>

@@ -462,3 +462,6 @@ livraison-libre { display: block; width: 100%; height: 100%; }
 .ll-row-head { padding-top: 0; }
 .ll-row-head .ll-section-title { margin-bottom: 0; }
 
+/* ---------- v1.7.1 : demi-tour avant le départ ---------- */
+.ll-flip { width: 100%; margin-top: 10px; }
+

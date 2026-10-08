@@ -377,7 +377,11 @@ function M.orientPickup(g, pickup, pZone, dest, ctx, maxSearch)
     end
     if viaA or viaB then break end
   end
-  if not viaA and not viaB then return pZone end
+  if not viaA and not viaB then
+    -- pas de trajet (destination hors d'atteinte) : au fond d'une allée, on repart quand même vers la rue
+    if not pickup.deadEnd then return pZone end
+    if pt == 0 then viaB = 0 else viaA = 0 end
+  end
   viaA, viaB = viaA or math.huge, viaB or math.huge
   local ax, ay, bx, by = g.x[e.a], g.y[e.a], g.x[e.b], g.y[e.b]
   local dirx, diry = bx - ax, by - ay

@@ -28,9 +28,10 @@ Parce qu'il tourne toujours entre les mêmes garages. Ici les destinations vienn
 - 📏 **Distance min / max par la route** (pas à vol d'oiseau), routes bitumées seulement ou terre incluse, voies rapides évitables
 - 🚗 **Véhicule aléatoire** parmi tous ceux installés, mods compris : filtres par catégorie, époque, variante, source et **boîte de vitesses** (auto, manuelle ou les deux), liste noire, jamais de props ni de remorques
 - 🅿️ **Zone P au sol** à 1,3× la taille du véhicule, rouge → bleue quand tu es entièrement dedans, avec un trait de 2 m au centre de la place
-- ✋ **Validation au frein à main**, ou **validation éclair** : 0,25 s après le frein à main, la livraison suivante est déjà lancée
+- ✋ **Validation au frein à main** (serré à 15 % suffit, pratique avec un frein à main progressif), ou **validation éclair** : 0,25 s après le frein à main, la livraison suivante est déjà lancée
 - 🧭 **Départ dans le sens du GPS**, peinture aléatoire
-- ⏱️ **Temps limite par difficulté**, de *Très facile* à *Impossible* : calculé à chaque livraison en simulant le trajet avec ce véhicule précis — accélération (0-100 km/h), vitesse max, freinage et tenue de route d'un côté, virages, limitations, largeur de la route et terre de l'autre. *Très facile* laisse le temps à un débutant qui respecte les limitations ; *Impossible* demande un pilote qui coupe les virages au plus vite. Le niveau se choisit dans l'onglet **Difficulté** (curseur coloré, du vert au violet), et peut encore changer au début de chaque livraison tant que tu n'as pas démarré
+- ⏱️ **Temps limite par difficulté**, de *Très facile* à *Impossible* : calculé à chaque livraison en simulant le trajet avec ce véhicule précis — accélération (0-100 km/h), vitesse max, freinage, tenue de route, comportement (plutôt drifteuse ou accrocheuse) et largeur d'un côté, virages, carrefours, montées et descentes, limitations, largeur de la route, terre et trafic de l'autre. *Très facile* laisse le temps à un débutant qui respecte les limitations ; *Impossible* demande un pilote qui coupe les virages au plus vite. Le niveau se choisit dans l'onglet **Difficulté** (curseur coloré, du vert au violet), et peut encore changer au début de chaque livraison tant que tu n'as pas démarré. À partir de *Très difficile*, le chrono tourne jusqu'à la validation : le stationnement compte (en option pour les autres niveaux)
+- ↻ **Demi-tour avant le départ** : si le véhicule apparaît dans le mauvais sens, un bouton du panneau le retourne sur place, tant que tu n'as pas démarré
 - ⏱️ **Perfs honnêtes** : chrono lancé à la 1re accélération et arrêté à 50 m de la zone — le stationnement est mesuré à part
 - 🚓 **Trafic et police** : sans trafic, avec trafic, patrouilles (ratio police / civils réglable) ou recherché, avec **jusqu'à 5 étoiles** qui montent tant que tu fuis — et une **difficulté qui suit les étoiles** : la police te suit à 1 étoile, te fonce dessus à partir de 3, multiplie barrages et véhicules lourds à 5 — et tout se règle **pendant la livraison** depuis le panneau (sans police, patrouilles, ou recherché au niveau d'étoiles voulu)
 - 🔕 **Les PNJ ignorent les sirènes** pendant les livraisons — ils continuent de rouler au lieu de se ranger — et la police est écartée à moins de 100 m de l'arrivée pour te garer tranquille
@@ -76,7 +77,17 @@ Le résumé attend la fin de l'écran de chargement suivant pour s'afficher — 
 
 ## Temps limite
 
-Pour chaque livraison, le mod reconstitue le trajet sur le réseau routier de la map et le découpe tous les 5 m. À chaque point, il calcule la vitesse possible : limitation de la route (dépassée de plus en plus selon le niveau, davantage sur une route large que sur une petite route), virages (vitesse de passage selon l'adhérence du véhicule — un véhicule haut prend les virages moins vite — et la trajectoire : un débutant reste dans sa voie, un pilote coupe, d'autant plus que la route est large), terre. Il simule ensuite l'accélération (calée sur le 0-100 km/h et la vitesse max annoncés par la config) et les freinages avant chaque virage. Les bouts hors route (sortir d'un parking, rejoindre la route) sont comptés à allure réduite. Le temps obtenu, avec une marge selon le niveau, devient ton temps limite, compté comme le chrono : de la 1re accélération jusqu'à 50 m de la zone. Tant que tu n'as pas démarré, tu peux encore changer le niveau (ou de véhicule) depuis le panneau : le temps est recalculé.
+Pour chaque livraison, le mod reconstitue le trajet sur le réseau routier de la map et le découpe tous les 5 m. À chaque point, il calcule la vitesse possible : limitation de la route (dépassée de plus en plus selon le niveau, davantage sur une route large que sur une petite route), virages (vitesse de passage selon l'adhérence du véhicule — un véhicule haut prend les virages moins vite — et la trajectoire : un débutant reste dans sa voie, un pilote coupe, d'autant plus que la route est large), terre. Il simule ensuite l'accélération (calée sur le 0-100 km/h et la vitesse max annoncés par la config) et les freinages avant chaque virage. Les bouts hors route (sortir d'un parking, rejoindre la route) sont comptés à allure réduite.
+
+**Pentes** — en montée, la pente prend sur la réserve du moteur : un véhicule puissant garde son allure, un véhicule faible ralentit jusqu'à ce que son moteur suffise, au pire au pas. En descente, la pente aide à accélérer mais allonge les freinages, et on lève le pied dans les descentes raides, en ligne droite comme en virage — un débutant beaucoup plus qu'un pilote.
+
+**Comportement du véhicule** — d'après sa fiche (transmission, puissance, poids, config) : une 4 roues motrices accroche ; une propulsion très puissante pour son poids, ou une config de drift, glisse : on exploite moins bien son adhérence, et en sortie de virage il faut attendre d'être plus droit pour accélérer. Dans tous les cas, en plein virage on ne peut pas freiner ni accélérer à fond, l'adhérence sert d'abord à tourner. Des pneus tout-terrain perdent moins d'adhérence sur la terre.
+
+**En ville** — là où les carrefours se suivent à moins de 220 m — on ralentit à chaque carrefour et on dépasse moins la limitation.
+
+**Avec du trafic** (celui du mod, ou celui du jeu en « Ne pas toucher »), les voitures roulent à la limitation : plus tu vas vite, plus tu les rattrapes. Pour chaque bout de route, le mod regarde si ton véhicule peut passer entre deux voitures côte à côte (chacune au milieu de sa voie) avec **50 cm de marge de chaque côté** — pas au millimètre près. Si ça passe, tu ne perds presque rien. S'il y a deux voies dans ton sens, tu doubles en changeant de voie. Sinon, tu dois te rabattre derrière elles et doubler quand la voie d'en face est libre, ou rester derrière sur un sens unique à une voie. Une citadine passe donc là où un bus doit attendre.
+
+Le temps obtenu, avec une marge selon le niveau, devient ton temps limite, compté comme le chrono : de la 1re accélération jusqu'à 50 m de la zone. À partir de *Très difficile*, il court jusqu'à la validation, stationnement compris, et le temps donné en tient compte. L'option *Chrono jusqu'à la validation* (Difficulté › Plus d'options) fait de même aux autres niveaux. Le journal garde, lui, le temps de trajet et le temps de stationnement séparés. Tant que tu n'as pas démarré, tu peux encore changer le niveau (ou de véhicule, ou faire demi-tour) depuis le panneau : le temps est recalculé.
 
 | Niveau | Conducteur visé |
 |---|---|
@@ -84,8 +95,8 @@ Pour chaque livraison, le mod reconstitue le trajet sur le réseau routier de la
 | Facile | Respecte les limitations |
 | Moyen | Conduite normale, un peu au-dessus des limitations |
 | Difficile | Bon conducteur, rapide |
-| Très difficile | Très rapide, trajectoires coupées |
-| Impossible | Pilote : à fond partout, sans marge |
+| Très difficile | Très rapide, trajectoires coupées — stationnement compris |
+| Impossible | Pilote : à fond partout, sans marge — stationnement compris |
 
 ## Police, étoiles et sirènes
 

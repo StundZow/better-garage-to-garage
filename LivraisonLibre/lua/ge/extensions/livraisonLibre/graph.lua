@@ -376,9 +376,11 @@ function M.route(g, from, to, maxDist)
   if not ef or not et then return nil end
   local ft, tt = from.t or 0, to.t or 0
   local pts = {}
-  local function add(x, y, z, e)
+  -- node : noeud du réseau à ce point (deg = nombre de routes qui s'y rejoignent : carrefour si 3 ou plus)
+  local function add(x, y, z, e, node)
     pts[#pts + 1] = {x = x, y = y, z = z, speed = e and e.speed, drv = e and e.drv,
-      r = e and (g.r[e.a] + g.r[e.b]) * 0.5}
+      r = e and (g.r[e.a] + g.r[e.b]) * 0.5, deg = node and g.deg[node] or nil,
+      lanes = e and e.lanes, oneWay = e and e.oneWay}
   end
   local function direct()
     local x, y, z = edgePoint(g, ef, ft); add(x, y, z, ef)
@@ -417,7 +419,7 @@ function M.route(g, from, to, maxDist)
   for k = #nodes, 1, -1 do
     local node = nodes[k]
     local e = (k > 1) and g.edges[used[k - 1]] or et
-    add(g.x[node], g.y[node], g.z[node], e)
+    add(g.x[node], g.y[node], g.z[node], e, node)
   end
   x, y, z = edgePoint(g, et, tt)
   add(x, y, z, nil)
