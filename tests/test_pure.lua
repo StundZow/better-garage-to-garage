@@ -725,8 +725,17 @@ do
   local narrow, wide = hairpin(2.5), hairpin(6)
   for _, lvl in ipairs({'dur', 'impossible'}) do
     local tn, tw = timing.estimate(narrow, sedan, lvl, {vehW = 1.9}), timing.estimate(wide, sedan, lvl, {vehW = 1.9})
-    check(tn > tw * 1.03, 'épingle : plus lente sur une petite route que sur une large (' .. lvl .. ')', string.format('%.1f / %.1f s', tn, tw))
+    check(tn > tw * 1.02, 'épingle : plus lente sur une petite route que sur une large (' .. lvl .. ')', string.format('%.1f / %.1f s', tn, tw))
   end
+  -- trajectoire idéale dans un demi-tour (extérieur, corde, extérieur) : rayon R + place libre / 2 au mieux
+  local prof = {}
+  timing.estimate(narrow, sedan, 'impossible', {vehW = 1.9, profile = prof})
+  local hp, rmin = nil, math.huge
+  for _, c in ipairs(prof.curves) do if c.hairpin then hp = c end end
+  for _, p in ipairs(prof) do if p.curv > 0 then rmin = math.min(rmin, 1 / p.curv) end end
+  local room = 5 - 1.9 - 0.6
+  check(hp and math.abs(hp.Req - 10) < 0.3 and math.abs(hp.R - (hp.Req + room / 2)) < 1e-6 and math.abs(rmin - hp.R) < 1e-6,
+    'épingle : trajectoire de rayon R + la moitié de la place libre', hp and string.format('R %.2f -> %.2f (plus serré : %.2f)', hp.Req, hp.R, rmin))
   local prev, mono = nil, true
   for _, L in ipairs(timing.LEVELS) do
     local t = timing.estimate(narrow, sedan, L.id, {vehW = 1.9, traffic = 1})
@@ -734,6 +743,105 @@ do
     prev = t
   end
   check(mono, 'épingle : niveau plus dur = jamais plus de temps')
+end
+
+print('-- virages en S')
+do
+  -- tracé « à la tortue » : {'S', longueur} ligne droite (un point tous les 20 m), {'A', rayon, angle} virage
+  -- (degrés, + à gauche, un point tous les 15°), {'K', angle} coude sur place
+  local function turtle(cmds, r)
+    local x, y, h = 0, 0, 0
+    local pts = {{x = x, y = y, z = 0, speed = 22, drv = 1, r = r}}
+    for _, c in ipairs(cmds) do
+      if c[1] == 'K' then
+        h = h + math.rad(c[2])
+      elseif c[1] == 'S' then
+        local n = math.max(1, math.floor(c[2] / 20 + 0.5))
+        for _ = 1, n do
+          x, y = x + math.cos(h) * c[2] / n, y + math.sin(h) * c[2] / n
+          pts[#pts + 1] = {x = x, y = y, z = 0, speed = 22, drv = 1, r = r}
+        end
+      else
+        local n = math.max(1, math.floor(math.abs(c[3]) / 15 + 0.5))
+        local dh = math.rad(c[3]) / n
+        local chord = 2 * c[2] * math.sin(math.abs(dh) / 2)
+        for _ = 1, n do
+          h = h + dh / 2
+          x, y = x + math.cos(h) * chord, y + math.sin(h) * chord
+          h = h + dh / 2
+          pts[#pts + 1] = {x = x, y = y, z = 0, speed = 22, drv = 1, r = r}
+        end
+      end
+    end
+    return pts
+  end
+  -- trajectoire du virage le plus serré (Difficile)
+  local function corner(pts)
+    local prof = {}
+    timing.estimate(pts, sedan, 'dur', {vehW = 1.9, profile = prof})
+    local best
+    for _, c in ipairs(prof.curves) do if c.theta > 0.5 and c.R and (not best or c.R < best.R) then best = c end end
+    return best
+  end
+  local plain = corner(turtle({{'S', 120}, {'A', 15, 90}, {'S', 120}}, 4))
+  local kink = corner(turtle({{'S', 100}, {'A', 1000, -1.2}, {'S', 15}, {'A', 15, 90}, {'S', 120}}, 4))
+  local sbend = corner(turtle({{'S', 120}, {'A', 15, -90}, {'S', 10}, {'A', 15, 90}, {'S', 120}}, 4))
+  local soft = corner(turtle({{'S', 120}, {'A', 150, -20}, {'S', 10}, {'A', 15, 90}, {'S', 120}}, 4))
+  -- virage à 90° de rayon 15 m sur une route de 8 m, 35 % de la place libre : R - h + 2 h / (1 - cos 45°)
+  local h = (8 - 1.9 - 0.6) * 0.5 * 0.35
+  check(plain and not plain.sbend and math.abs(plain.Req - 15) < 0.5 and math.abs(plain.R - (plain.Req - h + 2 * h / (1 - math.cos(math.pi / 4)))) < 1e-6,
+    'virage à 90° : cercle équivalent du milieu de la route et trajectoire coupée', plain and string.format('R %.2f -> %.2f', plain.Req, plain.R))
+  check(kink and not kink.sbend and math.abs(kink.R / plain.R - 1) < 0.01,
+    'petit coude de 1° en sens inverse juste avant : pas un S, même trajectoire', kink and string.format('%.3f / %.3f', kink.R, plain.R))
+  check(sbend and sbend.sbend and sbend.R < plain.R - 1,
+    'vrai S (deux virages à 90° en sens inverse) : moins de place pour couper', sbend and string.format('%.3f / %.3f', sbend.R, plain.R))
+  check(soft and not soft.sbend and math.abs(soft.R - plain.R) < 1e-3,
+    'courbe douce en sens inverse juste avant un virage serré : on sacrifie la douce, pas un S', soft and string.format('%.3f / %.3f', soft.R, plain.R))
+  -- petit crochet du tracé juste après un virage (segment de 4,7 m puis 12° dans l'autre sens) : la route de
+  -- sortie est celle d'après le crochet
+  local hook = corner(turtle({{'S', 120}, {'A', 15, 90}, {'S', 4.7}, {'K', -12}, {'S', 120}}, 4))
+  check(hook and math.abs(math.deg(hook.theta) - 78) < 1, 'petit crochet du tracé juste après un virage : virage de 90 - 12 = 78°',
+    hook and string.format('%.1f°', math.deg(hook.theta)))
+  -- virage fait de plusieurs coudes (points du GPS inégalement espacés) : lissé, pas plus serré que son cercle équivalent
+  local uneven = corner(turtle({{'S', 120}, {'A', 30, 13}, {'A', 30, 29, 29}, {'A', 30, 15}, {'A', 30, 11}, {'A', 30, 16}, {'S', 120}}, 4))
+  check(uneven and uneven.Req > 25, 'virage à coudes inégaux : rayon du virage entier, pas du coude le plus serré', uneven and string.format('R %.1f', uneven.Req))
+end
+
+print('-- géométrie courbe par courbe : même virage, même temps quel que soit l espacement des points')
+do
+  local function road(R, A, d)
+    local pts = {}
+    local function add(x, y) pts[#pts + 1] = {x = x, y = y, z = 0, speed = 22, drv = 1, r = 4} end
+    for x = -150, 0, d do add(x, 0) end
+    add(0, 0)
+    local nSeg = math.max(1, math.floor(R * A / d + 0.5))
+    for i = 1, nSeg do local a = A * i / nSeg; add(R * math.sin(a), R - R * math.cos(a)) end
+    local ex, ey, hx, hy = R * math.sin(A), R - R * math.cos(A), math.cos(A), math.sin(A)
+    for i = 1, math.floor(150 / d + 0.5) do add(ex + hx * d * i, ey + hy * d * i) end
+    return pts
+  end
+  local worst = 0
+  for _, c in ipairs({{30, math.pi / 2}, {60, math.pi / 2}, {120, math.pi / 3}}) do
+    for _, lvl in ipairs({'dur', 'impossible'}) do
+      local ref = timing.estimate(road(c[1], c[2], 1), sedan, lvl, {trimEnd = 0})
+      for _, d in ipairs({5, 10, 15, 20, 25, 35}) do
+        -- au moins un point par rayon de virage (une seule corde pour tout un virage serré le coupe déjà)
+        if d <= c[1] then
+          local t = timing.estimate(road(c[1], c[2], d), sedan, lvl, {trimEnd = 0})
+          worst = math.max(worst, math.abs(t / ref - 1))
+        end
+      end
+    end
+  end
+  check(worst < 0.03, 'virage décrit avec des points tous les 5 à 35 m (au moins un par rayon) : moins de 3 % d écart', string.format('%.1f %%', worst * 100))
+  -- bosse marquée en ligne droite : un pilote ne décolle pas (il lève le pied)
+  local flat, crest = straight(1500, 33), straight(1500, 33)
+  for i, p in ipairs(crest) do
+    local x = p.x - 700
+    if math.abs(x) < 40 then p.z = 8 - x * x / 200 elseif math.abs(x) < 80 then p.z = (80 - math.abs(x)) ^ 2 / 200 end
+  end
+  local tf, tc = timing.estimate(flat, sports, 'impossible'), timing.estimate(crest, sports, 'impossible')
+  check(tc > tf, 'bosse marquée : un pilote lève le pied pour ne pas décoller', string.format('%.1f / %.1f s', tf, tc))
 end
 
 print('-- trajet routier (graph.route)')

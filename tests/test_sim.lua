@@ -1042,7 +1042,8 @@ local function gridPath(cols)
 end
 local zi, zj = math.floor(zg.x / 120 + 0.5), math.floor(zg.y / 120 + 0.5)
 local direct, detour = {}, {}
-for i = 0, zi do direct[#direct + 1] = {i, zj} end
+-- (toujours au moins 5 points : depuis le bord de la ville le plus éloigné de la place)
+if zi >= 4 then for i = 0, zi do direct[#direct + 1] = {i, zj} end else for i = 8, zi, -1 do direct[#direct + 1] = {i, zj} end end
 for j = 0, 8 do detour[#detour + 1] = {0, j} end
 for i = 1, 8 do detour[#detour + 1] = {i, 8} end
 for j = 7, zj, -1 do detour[#detour + 1] = {8, j} end
@@ -1058,6 +1059,16 @@ check(tDetour > tDirect * 1.3, 'GPS avec un grand détour : plus de temps', stri
 core_groundMarkers.routePlanner = {path = {{pos = {x = -5000, y = -5000, z = 10}, wp = 'g0_0'}, {pos = {x = -4000, y = -5000, z = 10}, wp = 'g1_0'}}}
 M.setMissionTimeLevel('dur')
 check(math.abs(sess().timeLimit - tMod) < 0.5, 'tracé du GPS vers une autre place : ignoré, calcul du mod', string.format('%.1f / %.1f', sess().timeLimit, tMod))
+-- livraison avec le tracé du GPS : trajet enregistré pour mesurer la précision du temps limite
+core_groundMarkers.routePlanner = {path = gridPath(direct)}
+M.setMissionTimeLevel('dur')
+drive(300, 15)
+deliverNow()
+frames(10)
+local tj = env.files['/settings/livraisonLibre/trajets.json']
+local last = tj and tj.routes and tj.routes[#tj.routes]
+check(last and #last.wps >= 1 and last.level == 'dur' and last.limit and last.timeS and last.result == 'Livrée' and last.perf ~= nil,
+  'trajet de la livraison enregistré (tracé du GPS, niveau, temps donné, temps réel, véhicule)', last and #last.wps)
 core_groundMarkers.routePlanner = nil
 M.stop()
 M.setSettings({timeLimit = false, timeLevel = 'moyen', minDist = 300, autoNext = true})

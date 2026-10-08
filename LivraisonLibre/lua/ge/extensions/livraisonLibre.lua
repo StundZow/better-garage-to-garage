@@ -13,7 +13,7 @@ local trafficCtl = require('/lua/ge/extensions/livraisonLibre/trafficCtl')
 local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 local timing = require('/lua/ge/extensions/livraisonLibre/timing')
 
-local VERSION = '1.7.6'
+local VERSION = '1.7.7'
 local DATA_DIR = '/settings/livraisonLibre/'
 local DECAL_TEXTURE = 'art/shapes/interface/parkDecalStripes.png'
 -- réglages internes (regroupés : le fichier approche la limite de 200 variables locales de Lua)
@@ -23,6 +23,7 @@ K.STATS_FILE = DATA_DIR .. 'stats.json'
 K.POINTS_DIR = DATA_DIR .. 'points/'
 K.JOURNAL_FILE = DATA_DIR .. 'livraisons.json'
 K.JOURNAL_CSV = DATA_DIR .. 'livraisons.csv'
+K.ROUTES_FILE = DATA_DIR .. 'trajets.json' -- trajets des livraisons chronométrées (précision du temps limite)
 K.HISTORY_MAX = 25
 K.SWITCH_MIN_DIST = 500      -- en dessous, un véhicule abandonné n'est pas noté dans le journal
 K.PERF_START_SPEED = 1.5     -- m/s : le chrono du trajet démarre à la première accélération
@@ -269,6 +270,19 @@ end
 local function saveJournal()
   writeJson(K.JOURNAL_FILE, {version = 1, records = journalRecords})
   writeText(K.JOURNAL_CSV, journal.toCsv(journalRecords))
+end
+
+-- Trajets des livraisons chronométrées (tracé du GPS, véhicule, temps donné et temps réel) : de quoi
+-- mesurer la précision du calcul du temps sur de vraies livraisons. Les 200 dernières.
+local routeLog = {max = 200, list = nil}
+function routeLog.add(entry)
+  if not routeLog.list then
+    local saved = jsonReadFile(K.ROUTES_FILE)
+    routeLog.list = (type(saved) == 'table' and type(saved.routes) == 'table') and saved.routes or {}
+  end
+  table.insert(routeLog.list, entry)
+  while #routeLog.list > routeLog.max do table.remove(routeLog.list, 1) end
+  writeJson(K.ROUTES_FILE, {version = 1, routes = routeLog.list})
 end
 
 local function loadData()
@@ -1020,6 +1034,14 @@ local function recordMission(result, reason)
   })
   journalRecords[#journalRecords + 1] = rec
   saveJournal()
+  if S.timeLimit and S.timeRoute then
+    local tr = S.timeRoute
+    pcall(routeLog.add, {id = rec.id, date = rec.date, heure = rec.heure, map = levelName(), result = result, reason = reason,
+      level = S.timeLevel, limit = S.timeLimit, full = isFullChrono(), timeS = perfTime(), total = limitTime(),
+      parkS = m.nearAt and ((S.elapsed or 0) - m.nearAt) or nil, tripM = perfDist(), plannedM = S.routeDist,
+      vehicle = info.name, model = info.model, config = info.config, mainCat = info.mainCat, perf = info.perf,
+      vehW = tr.vehW, traffic = tr.traffic, wps = tr.wps, start = tr.start, finish = tr.finish})
+  end
 
   table.insert(stats.history, 1, {
     ok = result == 'Livrée', result = result, reason = reason,
@@ -1247,7 +1269,8 @@ local function gpsRoutePoints()
   local last = path[#path] and path[#path].pos
   if not last or (last.x - S.zone.x) ^ 2 + (last.y - S.zone.y) ^ 2 > 40 * 40 then return nil end -- tracé d'une autre livraison
   local ok, pts = pcall(graphLib.fromNodePath, levelData.g, path)
-  return ok and pts or nil
+  if not ok or not pts then return nil end
+  return pts, path
 end
 
 local function computeTimeLimit(plan, level)
@@ -1256,12 +1279,21 @@ local function computeTimeLimit(plan, level)
   local est
   -- de préférence le trajet du GPS (il peut être plus long que le plus court chemin) ; il va du véhicule
   -- jusqu'à la place, bouts hors route compris
-  local gps = gpsRoutePoints()
+  local gps, path = gpsRoutePoints()
   if gps then
     local info = S.info or {}
-    local opts = {traffic = timing.trafficDensity(trafficAmount()), vehW = S.vehW or info.w}
+    local amount = trafficAmount()
+    local opts = {traffic = timing.trafficDensity(amount), vehW = S.vehW or info.w}
     local okE, t = pcall(timing.estimate, gps, timing.vehicleModel(info.perf, info.mainCat), level, opts)
-    if okE and t then est = t end
+    if okE and t then
+      est = t
+      -- tracé gardé pour le journal des trajets (noeuds du réseau, départ et arrivée)
+      local wps = {}
+      for i = 1, #path do if path[i].wp ~= nil then wps[#wps + 1] = tostring(path[i].wp) end end
+      local p1, pn = path[1].pos, path[#path].pos
+      S.timeRoute = {wps = wps, start = {x = p1.x, y = p1.y, z = p1.z}, finish = {x = pn.x, y = pn.y, z = pn.z},
+        traffic = amount, vehW = opts.vehW}
+    end
   end
   if not est and levelData and from and from.e and plan.dest and plan.dest.e then
     local okR, pts = pcall(graphLib.route, levelData.g, from, plan.dest)
@@ -1311,6 +1343,7 @@ local function beginDriving()
     quiet = true
   else
     S.elapsed = 0
+    S.timeRoute = nil
     recent.remember(plan.pickup)
     recent.remember(plan.dest)
     -- trajet gardé : la difficulté peut encore changer tant que le chrono n'est pas lancé
