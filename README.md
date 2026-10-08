@@ -26,7 +26,7 @@ Parce qu'il tourne toujours entre les mêmes garages. Ici les destinations vienn
 
 - 🗺️ **Destinations aléatoires** sur le réseau routier de la map : bords de route, parkings, lieux d'intérêt, maisons et allées privées — ou **tes propres points** enregistrés
 - 📏 **Distance min / max par la route** (pas à vol d'oiseau), routes bitumées seulement ou terre incluse, voies rapides évitables
-- 🚗 **Véhicule aléatoire** parmi tous ceux installés, mods compris : filtres par catégorie, époque, variante, source et **boîte de vitesses** (auto, manuelle ou les deux), liste noire, jamais de props ni de remorques
+- 🚗 **Véhicule aléatoire** parmi tous ceux installés, mods compris : filtres par catégorie (*Sportives* ajoute les citadines, berlines, breaks et coupés rapides ; un tout-terrain ou un SUV rapide reste dans sa catégorie), époque, variante, source et **boîte de vitesses** (auto, manuelle ou les deux), liste noire, jamais de props ni de remorques
 - 🅿️ **Zone P au sol** à 1,3× la taille du véhicule, rouge → bleue quand tu es entièrement dedans, avec un trait de 2 m au centre de la place
 - ✋ **Validation au frein à main** (serré à 15 % suffit, pratique avec un frein à main progressif), ou **validation éclair** : 0,25 s après le frein à main, la livraison suivante est déjà lancée
 - 🧭 **Départ dans le sens du GPS**, peinture aléatoire

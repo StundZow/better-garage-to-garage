@@ -292,12 +292,25 @@ local function anyIn(set, wanted)
   return false
 end
 
+-- Carrosseries de voiture de route : la case « Sportives » y ajoute les versions rapides
+M.SPORT_BODIES = {citadine = true, berline = true, familiale = true, coupe = true}
+
+-- Catégorie : la carrosserie doit être cochée (tout-terrain, SUV, pick-up, autre...) ; « Sportives »
+-- ajoute les citadines, berlines, breaks et coupés rapides, même si leur carrosserie n'est pas cochée.
+-- (Un buggy ou un trophy truck rapide reste un tout-terrain : il faut cocher Tout-terrain.)
+local function catOk(info, cats)
+  local main = info.mainCat
+  if not main then return anyIn(info.cats, cats) end
+  if cats[main] then return true end
+  return (cats.sport and info.cats and info.cats.sport and M.SPORT_BODIES[main]) and true or false
+end
+
 function M.isEligible(info, vs)
   if vs.blacklist and vs.blacklist[info.model] then return false end
   if vs.sources and not vs.sources[info.srcKind] then return false end
   if vs.variants and not vs.variants[info.variant] then return false end
   if vs.epochs and not anyIn(info.epochs, vs.epochs) then return false end
-  if vs.cats and not anyIn(info.cats, vs.cats) then return false end
+  if vs.cats and not catOk(info, vs.cats) then return false end
   if vs.transmission and vs.transmission ~= 'both' and info.trans ~= vs.transmission then return false end
   return true
 end

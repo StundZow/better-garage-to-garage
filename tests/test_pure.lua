@@ -661,6 +661,32 @@ do
   check(math.abs(timing.estimate(line, drag, 'impossible') - timing.estimate(line, free, 'impossible')) < 0.01, 'voiture de drag : accélération du 0-100 mesuré, pas bridée par la motricité')
 end
 
+print('-- catégories : « Sportives » ne fait pas passer un tout-terrain rapide')
+do
+  local vehLib = require('/lua/ge/extensions/livraisonLibre/vehicles')
+  local function cls(body, typ, extra)
+    local c = {model_key = 'x' .. body:gsub('%W', ''), key = 'k', pcFilename = '/vehicles/x/k.pc', Name = body, ['Body Style'] = body}
+    for k, v in pairs(extra or {}) do c[k] = v end
+    return vehLib.classify(c, {Type = typ or 'Car'})
+  end
+  local baja = cls('Buggy', 'Car', {['0-100 km/h'] = 4.5})          -- tout-terrain rapide
+  local trophy = cls('Trophy Truck', 'Car', {['0-100 km/h'] = 5.0})  -- tout-terrain rapide
+  local rock = cls('SUV', 'Car', {['0-100 km/h'] = 5.5})             -- SUV rapide
+  local formula = cls('Open Wheel', 'Car', {['0-100 km/h'] = 2.8})   -- catégorie « autre »
+  local hotHatch = cls('Hatchback', 'Car', {['0-100 km/h'] = 5.8})   -- citadine sportive
+  local calmSedan = cls('Sedan', 'Car', {['0-100 km/h'] = 10})       -- berline normale
+  check(baja.cats.sport and baja.mainCat == 'toutterrain' and hotHatch.cats.sport, 'classement : rapides marqués sportifs, carrosserie gardée')
+  local vs = {cats = {berline = true, coupe = true, familiale = true, sport = true, toutterrain = false, suv = false, autre = false, citadine = false}}
+  check(not vehLib.isEligible(baja, vs) and not vehLib.isEligible(trophy, vs), 'Sportives cochées, Tout-terrain décoché : pas de buggy ni de trophy truck')
+  check(not vehLib.isEligible(rock, vs), 'Sportives cochées, SUV décoché : pas de SUV rapide')
+  check(not vehLib.isEligible(formula, vs), 'Sportives cochées, Autre décoché : pas de monoplace')
+  check(vehLib.isEligible(hotHatch, vs), 'Sportives cochées : citadine sportive acceptée même si Citadines est décoché')
+  check(vehLib.isEligible(calmSedan, vs), 'Berlines cochées : berline normale acceptée')
+  check(not vehLib.isEligible(cls('Hatchback', 'Car', {['0-100 km/h'] = 12}), vs), 'citadine normale : refusée (Citadines décoché)')
+  local onlyOffroad = {cats = {toutterrain = true}}
+  check(vehLib.isEligible(baja, onlyOffroad) and not vehLib.isEligible(hotHatch, onlyOffroad), 'Tout-terrain seul : buggy oui, citadine sportive non')
+end
+
 print('-- trajet routier (graph.route)')
 local gr = graph.build((citygen.city(9, 120)))
 local spots = loc.buildRoadSpots(gr)
