@@ -1022,6 +1022,46 @@ p2:delete()
 M.stop()
 M.setSettings({autoNext = true, traffic = {clearNearSpot = true, clearPoliceNearEnd = true}})
 
+print('-- v1.7.6 : temps limite calculé sur le trajet du GPS')
+M.setSettings({timeLimit = true, timeLevel = 'dur', minDist = 600, autoNext = false, instantNext = false, traffic = {mode = 'keep', police = 'off'}})
+M.start()
+frames(400)
+check(sess() and sess().phase == 'driving' and hud().chronoState == 'wait', 'livraison prête (chrono pas lancé)')
+local zg = env.lastZone
+local tMod = sess().timeLimit
+-- deux tracés du GPS vers la place : direct, et avec un grand détour
+local function gridPath(cols)
+  local p = {{pos = {x = getPlayerVehicle(0).pos.x, y = getPlayerVehicle(0).pos.y, z = 10}}}
+  for _, c in ipairs(cols) do
+    local id = 'g' .. c[1] .. '_' .. c[2]
+    local n = env.nodes[id]
+    p[#p + 1] = {pos = {x = n.pos.x, y = n.pos.y, z = n.pos.z}, wp = id}
+  end
+  p[#p + 1] = {pos = {x = zg.x, y = zg.y, z = zg.z}}
+  return p
+end
+local zi, zj = math.floor(zg.x / 120 + 0.5), math.floor(zg.y / 120 + 0.5)
+local direct, detour = {}, {}
+for i = 0, zi do direct[#direct + 1] = {i, zj} end
+for j = 0, 8 do detour[#detour + 1] = {0, j} end
+for i = 1, 8 do detour[#detour + 1] = {i, 8} end
+for j = 7, zj, -1 do detour[#detour + 1] = {8, j} end
+for i = 7, zi, -1 do detour[#detour + 1] = {i, zj} end
+core_groundMarkers.routePlanner = {path = gridPath(direct)}
+M.setMissionTimeLevel('dur')
+local tDirect = sess().timeLimit
+core_groundMarkers.routePlanner = {path = gridPath(detour)}
+M.setMissionTimeLevel('dur')
+local tDetour = sess().timeLimit
+check(tDetour > tDirect * 1.3, 'GPS avec un grand détour : plus de temps', string.format('%.0f -> %.0f s (calcul du mod : %.0f s)', tDirect, tDetour, tMod))
+-- tracé qui ne mène pas à cette place (ancienne livraison) : ignoré
+core_groundMarkers.routePlanner = {path = {{pos = {x = -5000, y = -5000, z = 10}, wp = 'g0_0'}, {pos = {x = -4000, y = -5000, z = 10}, wp = 'g1_0'}}}
+M.setMissionTimeLevel('dur')
+check(math.abs(sess().timeLimit - tMod) < 0.5, 'tracé du GPS vers une autre place : ignoré, calcul du mod', string.format('%.1f / %.1f', sess().timeLimit, tMod))
+core_groundMarkers.routePlanner = nil
+M.stop()
+M.setSettings({timeLimit = false, timeLevel = 'moyen', minDist = 300, autoNext = true})
+
 print('-- relecture complète du mod : corrections')
 -- police du jeu : ses réglages sont remis comme avant à l'arrêt, même en « Ne pas toucher »
 env.policeVars = {strictness = 0.7, suspectFrequency = 0.5}

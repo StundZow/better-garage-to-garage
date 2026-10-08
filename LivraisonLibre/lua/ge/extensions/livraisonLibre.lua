@@ -13,7 +13,7 @@ local trafficCtl = require('/lua/ge/extensions/livraisonLibre/trafficCtl')
 local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 local timing = require('/lua/ge/extensions/livraisonLibre/timing')
 
-local VERSION = '1.7.5'
+local VERSION = '1.7.6'
 local DATA_DIR = '/settings/livraisonLibre/'
 local DECAL_TEXTURE = 'art/shapes/interface/parkDecalStripes.png'
 -- réglages internes (regroupés : le fichier approche la limite de 200 variables locales de Lua)
@@ -1239,11 +1239,31 @@ local function trafficAmount()
 end
 
 -- Temps limite de la livraison : simulation du trajet avec ce véhicule, au niveau de difficulté choisi
+-- Trajet tracé par le GPS du jeu (celui que le joueur suit) s'il mène bien à la place actuelle, avant le départ
+local function gpsRoutePoints()
+  local rp = core_groundMarkers and core_groundMarkers.routePlanner
+  local path = rp and rp.path
+  if not levelData or not S or not S.zone or type(path) ~= 'table' or not path[2] or (S.m and S.m.moveAt) then return nil end
+  local last = path[#path] and path[#path].pos
+  if not last or (last.x - S.zone.x) ^ 2 + (last.y - S.zone.y) ^ 2 > 40 * 40 then return nil end -- tracé d'une autre livraison
+  local ok, pts = pcall(graphLib.fromNodePath, levelData.g, path)
+  return ok and pts or nil
+end
+
 local function computeTimeLimit(plan, level)
   level = level or settings.timeLevel
   local from = plan.pickup or plan.from
   local est
-  if levelData and from and from.e and plan.dest and plan.dest.e then
+  -- de préférence le trajet du GPS (il peut être plus long que le plus court chemin) ; il va du véhicule
+  -- jusqu'à la place, bouts hors route compris
+  local gps = gpsRoutePoints()
+  if gps then
+    local info = S.info or {}
+    local opts = {traffic = timing.trafficDensity(trafficAmount()), vehW = S.vehW or info.w}
+    local okE, t = pcall(timing.estimate, gps, timing.vehicleModel(info.perf, info.mainCat), level, opts)
+    if okE and t then est = t end
+  end
+  if not est and levelData and from and from.e and plan.dest and plan.dest.e then
     local okR, pts = pcall(graphLib.route, levelData.g, from, plan.dest)
     if okR and pts then
       local info = S.info or {}
@@ -1329,6 +1349,7 @@ local function beginDriving()
   reserveSpot()
   S.clearTimer = 0
   setRoute()
+  refreshTimeLimit() -- sur le trajet que le GPS vient de tracer
   createMarker()
   endFade()
   if next(ffbHeld) then S.ffbRelease = K.FFB_RELEASE_DELAY end

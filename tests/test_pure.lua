@@ -687,6 +687,55 @@ do
   check(vehLib.isEligible(baja, onlyOffroad) and not vehLib.isEligible(hotHatch, onlyOffroad), 'Tout-terrain seul : buggy oui, citadine sportive non')
 end
 
+print('-- trajet du GPS du jeu (fromNodePath) et épingles')
+do
+  -- trajet « GPS » le long de la ligne y = 360 de la ville de test, avec départ et arrivée hors noeud
+  local path = {{pos = {x = 100, y = 352, z = 10}}}
+  for i = 1, 6 do
+    local id = 'g' .. i .. '_3'
+    local p = nodes[id].pos
+    path[#path + 1] = {pos = {x = p.x, y = p.y, z = p.z}, wp = id}
+  end
+  path[#path + 1] = {pos = {x = 740, y = 352, z = 10}}
+  local gp = graph.fromNodePath(g, path)
+  check(gp and #gp == #path, 'trajet du GPS converti', gp and #gp)
+  local nJn = 0
+  for k = 2, #gp - 1 do if gp[k].jn then nJn = nJn + 1 end end
+  check(nJn >= 4 and (gp[2].deg or 0) >= 4, 'trajet du GPS : croisements de la ville retrouvés', nJn)
+  check(gp[1].r and gp[#gp - 1].r, 'trajet du GPS : départ et arrivée hors noeud avec les attributs de la route voisine')
+  local t = timing.estimate(gp, sedan, 'moyen')
+  check(t and t > 0, 'trajet du GPS : temps calculé', t)
+  -- noeuds inconnus du mod : trajet refusé (on garde le calcul du mod)
+  check(graph.fromNodePath(g, {{pos = {x = 0, y = 0, z = 0}, wp = 'nope1'}, {pos = {x = 50, y = 0, z = 0}, wp = 'nope2'}, {pos = {x = 99, y = 0, z = 0}, wp = 'nope3'}}) == nil,
+    'trajet du GPS hors du réseau du mod : refusé')
+  check(graph.fromNodePath(g, {{pos = {x = 0, y = 0, z = 0}}}) == nil and graph.fromNodePath(g, nil) == nil, 'trajet du GPS trop court ou absent : refusé')
+end
+do
+  -- épingle (demi-tour de rayon 10 m) : sur une petite route on ne gagne presque rien à couper
+  local function hairpin(r)
+    local pts = {}
+    for i = 0, 4 do pts[#pts + 1] = {x = -60 + i * 15, y = 0, z = 0, speed = 22, drv = 1, r = r} end
+    for a = 1, 11 do
+      local ang = -math.pi / 2 + a * math.pi / 12
+      pts[#pts + 1] = {x = 10 * math.cos(ang), y = 10 + 10 * math.sin(ang), z = 0, speed = 22, drv = 1, r = r}
+    end
+    for i = 1, 4 do pts[#pts + 1] = {x = -i * 15, y = 20, z = 0, speed = 22, drv = 1, r = r} end
+    return pts
+  end
+  local narrow, wide = hairpin(2.5), hairpin(6)
+  for _, lvl in ipairs({'dur', 'impossible'}) do
+    local tn, tw = timing.estimate(narrow, sedan, lvl, {vehW = 1.9}), timing.estimate(wide, sedan, lvl, {vehW = 1.9})
+    check(tn > tw * 1.03, 'épingle : plus lente sur une petite route que sur une large (' .. lvl .. ')', string.format('%.1f / %.1f s', tn, tw))
+  end
+  local prev, mono = nil, true
+  for _, L in ipairs(timing.LEVELS) do
+    local t = timing.estimate(narrow, sedan, L.id, {vehW = 1.9, traffic = 1})
+    if prev and t > prev + 1e-6 then mono = false end
+    prev = t
+  end
+  check(mono, 'épingle : niveau plus dur = jamais plus de temps')
+end
+
 print('-- trajet routier (graph.route)')
 local gr = graph.build((citygen.city(9, 120)))
 local spots = loc.buildRoadSpots(gr)

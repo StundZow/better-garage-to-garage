@@ -12,6 +12,7 @@ local sqrt, min, max, abs, atan2, log, pi, huge = math.sqrt, math.min, math.max,
 local G = 9.81
 local STEP = 5          -- m : pas de la simulation
 local WINDOW = 2        -- pas de part et d'autre pour mesurer la courbure (±10 m)
+local TURN_W = 5        -- pas de part et d'autre pour mesurer l'angle d'un virage (±25 m)
 local ROAD_WIDTH = 8    -- m : largeur d'une route normale à double sens (référence)
 local JUNCTION_R = 10   -- m : ralentissement autour d'un carrefour
 local JUNCTION_MERGE = 30 -- m : carrefours plus proches = un seul (gros carrefour à plusieurs noeuds)
@@ -40,17 +41,17 @@ local BLOCK = {squeeze = 0.025, lanes = 0.06, twoWay = 0.10, twoWayTown = 0.15, 
 -- margin : marge sur le temps simulé
 M.LEVELS = {
   {id = 'tres_facile', label = 'Très facile',    limit = 0.9, wgain = 0.06, free = 0,    grip = 0.40, accel = 0.45, brake = 0.40, line = 1.05,
-   town = 1,    tfree = 0,    jn = 26, down = 2.0, park = 36, margin = 1.33},
+   town = 1,    tfree = 0,    jn = 26, down = 2.0, park = 36, margin = 1.41},
   {id = 'facile',      label = 'Facile',         limit = 1.0, wgain = 0.08, free = 0,    grip = 0.50, accel = 0.55, brake = 0.50, line = 1.08,
-   town = 1,    tfree = 0,    jn = 32, down = 1.6, park = 28, margin = 1.12},
+   town = 1,    tfree = 0,    jn = 32, down = 1.6, park = 28, margin = 1.19},
   {id = 'moyen',       label = 'Moyen',          limit = 1.2, wgain = 0.17, free = 0.05, grip = 0.65, accel = 0.75, brake = 0.65, line = 1.15,
-   town = 0.7,  tfree = 0,    jn = 42, down = 1.2, park = 22, margin = 1.0},
+   town = 0.7,  tfree = 0,    jn = 42, down = 1.2, park = 22, margin = 1.06},
   {id = 'dur',         label = 'Difficile',      limit = 1.5, wgain = 0.33, free = 0.15, grip = 0.80, accel = 0.90, brake = 0.80, line = 1.35,
-   town = 0.65, tfree = 0,    jn = 55, down = 0.8, park = 18, margin = 0.91},
+   town = 0.65, tfree = 0,    jn = 55, down = 0.8, park = 18, margin = 0.97},
   {id = 'tres_dur',    label = 'Très difficile', limit = 1.9, wgain = 0.47, free = 0.35, grip = 0.92, accel = 1.0,  brake = 0.92, line = 1.6,
-   town = 0.65, tfree = 0.1,  jn = 65, down = 0.5, park = 14, margin = 0.89},
+   town = 0.65, tfree = 0.1,  jn = 65, down = 0.5, park = 14, margin = 0.93},
   {id = 'impossible',  label = 'Impossible',     limit = 2.0, wgain = 0.5,  free = 1,    grip = 1.05, accel = 1.0,  brake = 1.0,  line = 2.0,
-   town = 0.55, tfree = 0.3,  jn = 78, down = 0.2, park = 10, margin = 0.85},
+   town = 0.55, tfree = 0.3,  jn = 78, down = 0.2, park = 10, margin = 0.865},
 }
 M.byId = {}
 for i, l in ipairs(M.LEVELS) do l.index = i; M.byId[l.id] = l end
@@ -237,6 +238,15 @@ function M.estimate(points, veh, level, opts)
     -- et une route large permet de rouler plus vite qu'une petite route étroite
     local w = clamp(tonumber(smp[k].width) or ROAD_WIDTH, 2.5, 30)
     local line = 1 + ((L.line or 1) - 1) * clamp(w / ROAD_WIDTH, 0.4, 1.6)
+    -- trajectoire : couper un virage fait gagner au plus la place libre (largeur - véhicule), d'autant plus
+    -- que le virage est ouvert ; dans une épingle sur une petite route, presque rien
+    if curv > 1e-4 and line > 1 then
+      local R = 1 / curv
+      local turn = abs(wrap(smp[min(n, k + TURN_W)].heading - smp[max(1, k - TURN_W)].heading))
+      local room = max(0, w - vehW - 0.6) * ((L.line or 1) - 1)
+      local lineGeo = (R + room / max(0.05, 1 - math.cos(turn * 0.5))) / R
+      line = max(1, min(line, lineGeo))
+    end
     local vc = curv > 1e-4 and sqrt(veh.aLat * grip * line / curv) or huge
     -- pour le cercle d'adhérence : virage pris (courbure) et adhérence latérale totale du véhicule ici
     smp[k].curv, smp[k].latCap = curv, veh.aLat * gs * line

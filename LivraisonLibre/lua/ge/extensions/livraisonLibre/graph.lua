@@ -463,6 +463,63 @@ function M.route(g, from, to, maxDist)
 end
 
 -- Distance routière d'un point attaché (ei, t, off) à partir d'une table dist (dir : voir endDists).
+-- Trajet tracé par le GPS du jeu (liste de points {pos, wp = id du noeud du réseau}) : mêmes points que
+-- M.route (limitation, état, largeur, voies, sens unique, vrais carrefours). nil si le trajet ne suit pas le
+-- réseau du mod (moins de la moitié des segments retrouvés).
+function M.fromNodePath(g, path)
+  if not g or type(path) ~= 'table' or #path < 2 then return nil end
+  local n = #path
+  local idx, pos = {}, {}
+  for i = 1, n do
+    local p = path[i]
+    local pp = type(p) == 'table' and p.pos
+    if not pp or not finite(pp.x) or not finite(pp.y) or not finite(pp.z) then return nil end
+    pos[i] = pp
+    idx[i] = (p.wp ~= nil) and g.idx[p.wp] or nil
+  end
+  local function edgeBetween(a, b)
+    if not a or not b or a == b then return nil end
+    for _, ei in ipairs(g.adj[a]) do
+      local e = g.edges[ei]
+      if (e.a == a and e.b == b) or (e.a == b and e.b == a) then return ei end
+    end
+    return nil
+  end
+  local seg, found = {}, 0
+  for i = 1, n - 1 do
+    seg[i] = edgeBetween(idx[i], idx[i + 1])
+    if seg[i] then found = found + 1 end
+  end
+  if found == 0 or found < (n - 1) * 0.5 then return nil end
+  -- segments hors du réseau (départ du véhicule, arrivée sur la place) : attributs du segment voisin
+  local attr = {}
+  for i = 1, n - 1 do
+    local ei = seg[i]
+    if not ei then
+      for d = 1, n do
+        if seg[i - d] then ei = seg[i - d] break end
+        if seg[i + d] then ei = seg[i + d] break end
+        if i - d < 1 and i + d > n - 1 then break end
+      end
+    end
+    attr[i] = ei
+  end
+  local pts = {}
+  for i = 1, n do
+    local ei = attr[min(i, n - 1)]
+    local e = ei and g.edges[ei]
+    local node = idx[i]
+    local jn
+    if node and i > 1 and i < n then
+      jn = isCrossing(g, node, seg[i - 1], seg[i], pos[i - 1].x, pos[i - 1].y, pos[i + 1].x, pos[i + 1].y)
+    end
+    pts[i] = {x = pos[i].x, y = pos[i].y, z = pos[i].z, speed = e and e.speed, drv = e and e.drv,
+      r = e and (g.r[e.a] + g.r[e.b]) * 0.5, deg = node and g.deg[node] or nil, jn = jn,
+      lanes = e and e.lanes, oneWay = e and e.oneWay}
+  end
+  return pts
+end
+
 function M.pointDist(g, dist, ei, t, off, dir)
   local best, viaB = M.endDists(g, dist, ei, t, dir)
   if viaB and (not best or viaB < best) then best = viaB end
