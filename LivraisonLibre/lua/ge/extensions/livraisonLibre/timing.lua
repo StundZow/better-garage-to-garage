@@ -100,7 +100,8 @@ function M.vehicleModel(perf, mainCat)
   local pw = (P and m and m > 0) and (P * 1000 / m) or 0 -- W/kg
   local drive = type(perf.drive) == 'string' and perf.drive:upper() or ''
   local share, stab
-  if drive:find('AWD', 1, true) or drive:find('4WD', 1, true) then
+  local wheels, driven = drive:match('(%d+)X(%d+)') -- '4x4', '6x6', '8x8' : toutes les roues motrices
+  if drive:find('AWD', 1, true) or drive:find('4WD', 1, true) or (wheels and wheels == driven) then
     share, stab = 0.95, 1 - 0.05 * clamp((pw - 200) / 200, 0, 1)
   elseif drive:find('FWD', 1, true) then
     share, stab = 0.55, 0.97 - 0.10 * clamp((pw - 110) / 150, 0, 1)
@@ -283,13 +284,15 @@ function M.estimate(points, veh, level, opts)
     -- tard encore avec une voiture qui glisse (stab)
     local sp = smp[k - 1]
     local f = sp.curv > 1e-4 and min(1.5, u * u * sp.curv / sp.latCap) or 0
-    local trac = veh.aBrk * sp.gs * (veh.share or 0.6) * sqrt(max(0.05, 1 - (f / (veh.stab or 1)) ^ 2))
+    local trac = max(veh.aBrk * (veh.share or 0.6), veh.A) * sp.gs * sqrt(max(0.05, 1 - (f / (veh.stab or 1)) ^ 2))
     a = min(a, trac - G * slope)
     local vk = sqrt(max(0, u * u + 2 * a * STEP))
-    if a < 0 then
-      -- côte trop raide : on ralentit jusqu'à la vitesse que le moteur peut tenir (au pire, au pas)
+    if slope > 0 then
+      -- côte : on ralentit jusqu'à la vitesse que le moteur peut tenir, mais jamais sous le pas (en
+      -- première), même s'il reste un peu de réserve ; sans aller plus vite qu'à plat
       local vEq = (G * slope < veh.A) and veh.vt * sqrt(1 - G * slope / veh.A) or 0
-      vk = max(vk, min(max(u, V_CRAWL), max(V_CRAWL, vEq)))
+      local vFlat = sqrt(u * u + 2 * min(L.accel * amax, trac) * STEP)
+      vk = max(vk, min(max(u, V_CRAWL), max(V_CRAWL, vEq), vFlat))
     end
     v[k] = min(vmax[k], vk)
   end

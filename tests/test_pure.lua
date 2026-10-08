@@ -611,6 +611,56 @@ do
     cls and string.format('%s / %s / %s', tostring(cls.perf.drive), tostring(cls.perf.cfgType), tostring(cls.perf.offroad)))
 end
 
+print('-- côtes à la limite du moteur, transmissions NxN, motricité des voitures de drag')
+do
+  -- pas de « falaise » : une côte un peu plus raide ne donne jamais beaucoup moins de temps
+  local function climb(grade, len)
+    local pts = {}
+    for i = 0, (len or 500) / 50 do pts[#pts + 1] = {x = i * 50, y = 0, z = i * 50 * grade, speed = 22, drv = 1, r = 5} end
+    return pts
+  end
+  local worst, prevT = 1, nil
+  for g10000 = 1000, 2500, 25 do
+    local t = timing.estimate(climb(g10000 / 10000), bus, 'moyen')
+    if prevT then worst = math.min(worst, t / prevT) end
+    prevT = t
+  end
+  check(worst > 0.95, 'côte de plus en plus raide : pas de chute brutale du temps', string.format('%.2f', worst))
+  local tAt, tAbove = timing.estimate(climb(0.1546), bus, 'tres_facile'), timing.estimate(climb(0.155), bus, 'tres_facile')
+  check(tAt < tAbove * 1.2, 'côte juste à la limite du moteur : pas de temps absurde', string.format('%.0f / %.0f s', tAt, tAbove))
+  -- côte en terre avec une épingle : niveau plus dur = jamais plus de temps
+  local sport = timing.vehicleModel({top = 75, z100 = 4.2, brakeG = 0.95, height = 1.3, power = 600, weight = 1600, drive = 'RWD'}, 'sport')
+  local s, pts, x, y, h = 0.312, {}, 0, 0, 0
+  for i = 1, 16 do
+    pts[i] = {x = x, y = y, z = (i - 1) * 20 * s, speed = 22, drv = 0, r = 5}
+    if i == 5 then h = h + 3.0 end
+    local hor = 20 * math.sqrt(1 - s * s)
+    x, y = x + hor * math.cos(h), y + hor * math.sin(h)
+  end
+  local prev, mono = nil, true
+  for _, L in ipairs(timing.LEVELS) do
+    local t = timing.estimate(pts, sport, L.id)
+    if prev and t > prev + 1e-6 then mono = false end
+    prev = t
+  end
+  check(mono, 'côte en terre avec épingle : niveau plus dur = jamais plus de temps')
+  -- démarrage en côte : jamais plus rapide qu'à plat
+  check(timing.estimate(climb(0.30, 80), bus, 'tres_facile') >= timing.estimate(climb(0, 80), bus, 'tres_facile') - 1e-6, 'côte raide au départ : pas plus rapide qu à plat')
+  -- 4x4 / 6x6 / 8x8 : toutes les roues motrices
+  for _, d in ipairs({'4x4', '6x6', '8x8', 'AWD'}) do
+    local m = timing.vehicleModel({top = 50, z100 = 8, brakeG = 1, power = 300, weight = 2000, drive = d}, 'suv')
+    check(m.share >= 0.95 and m.stab >= 0.95, 'transmission ' .. d .. ' : toutes les roues motrices', string.format('%.2f / %.2f', m.share, m.stab))
+  end
+  check(timing.vehicleModel({top = 50, z100 = 8, brakeG = 1, power = 300, weight = 2000, drive = '6x4'}, 'camion').share < 0.95, '6x4 : pas toutes les roues motrices')
+  -- voiture de drag : la motricité ne ralentit pas son accélération sous le 0-100 mesuré par le jeu
+  local drag = timing.vehicleModel({top = 80, z100 = 2.2, brakeG = 1.0, height = 1.2, power = 1100, weight = 900, drive = 'RWD'}, 'sport')
+  local free = {}
+  for k, v in pairs(drag) do free[k] = v end
+  free.share = 50
+  local line = straight(1000, 60)
+  check(math.abs(timing.estimate(line, drag, 'impossible') - timing.estimate(line, free, 'impossible')) < 0.01, 'voiture de drag : accélération du 0-100 mesuré, pas bridée par la motricité')
+end
+
 print('-- trajet routier (graph.route)')
 local gr = graph.build((citygen.city(9, 120)))
 local spots = loc.buildRoadSpots(gr)
