@@ -172,6 +172,19 @@ livraison-libre { display: block; width: 100%; height: 100%; }
 .ll-actions .ll-btn:not(.ll-btn-icon) { flex: 1 1 auto; }
 .ll-note { color: var(--ll-muted); font-size: 11.5px; margin-top: 7px; }
 
+/* multijoueur : le groupe */
+.ll-group { margin: 8px 0 2px; padding: 7px 10px; background: var(--ll-bg2); border: 1px solid var(--ll-line); border-radius: 10px; }
+.ll-group-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.ll-group-title { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--ll-muted); }
+.ll-group-lead { font-size: 11px; color: var(--ll-accent2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ll-group-row { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; }
+.ll-group-rank { width: 18px; color: var(--ll-muted); font-variant-numeric: tabular-nums; }
+.ll-group-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ll-group-state { color: var(--ll-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ll-group-me .ll-group-name { font-weight: 700; }
+.ll-group-ok .ll-group-state { color: var(--ll-green); font-weight: 600; }
+.ll-group-ko .ll-group-state { color: var(--ll-red); }
+
 .ll-result { margin-top: 10px; padding: 10px; border-radius: 11px; border: 1px solid var(--ll-line); background: var(--ll-bg2); }
 .ll-result-ok { border-color: rgba(47, 207, 116, 0.5); background: rgba(47, 207, 116, 0.09); }
 .ll-result-ko { border-color: rgba(229, 64, 47, 0.5); background: rgba(229, 64, 47, 0.09); }

@@ -12,8 +12,9 @@ local vehLib = require('/lua/ge/extensions/livraisonLibre/vehicles')
 local trafficCtl = require('/lua/ge/extensions/livraisonLibre/trafficCtl')
 local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 local timing = require('/lua/ge/extensions/livraisonLibre/timing')
+local multi = require('/lua/ge/extensions/livraisonLibre/multi')
 
-local VERSION = '1.7.7'
+local VERSION = '1.8.0'
 local DATA_DIR = '/settings/livraisonLibre/'
 local DECAL_TEXTURE = 'art/shapes/interface/parkDecalStripes.png'
 -- réglages internes (regroupés : le fichier approche la limite de 200 variables locales de Lua)
@@ -39,6 +40,9 @@ K.ANALYSIS_BUDGET = 0.006    -- s de calcul par image pour l'analyse de la map (
 K.ANALYSIS_TIMEOUT = 45      -- s : au-delà, l'analyse est abandonnée avec un message
 K.ANALYSIS_FILE = DATA_DIR .. 'analyse.txt' -- étapes de la dernière analyse (diagnostic)
 K.FFB_RELEASE_DELAY = 1.5    -- s après le retour de l'image avant de rendre le retour de force
+K.MP_JOIN_WAIT = 4           -- s : réponse du serveur BeamMP attendue (sinon : pas de plugin, livraisons en solo)
+K.MP_PROPOSE_WAIT = 6        -- s : livraison du chef renvoyée par le serveur à tout le groupe
+K.MP_NEXT_DELAY = 6          -- s : tout le groupe a fini, résultats affichés avant la livraison suivante
 
 local abs, min, max, sqrt, floor = math.abs, math.min, math.max, math.sqrt, math.floor
 
@@ -142,6 +146,7 @@ local startPending = false
 local analysisErrors = 0
 local ffbHeld = {}       -- véhicules dont le retour de force est coupé pendant un chargement
 local poiSaved = nil     -- états du jeu où les points d'intérêt s'affichent (mis de côté pendant les livraisons)
+local MPL = {}           -- multijoueur BeamMP (livraisons en groupe) : fonctions définies plus bas
 
 ---------------------------------------------------------------------------
 -- utilitaires
@@ -658,7 +663,15 @@ local function pickVehicleInfo()
   local pool = ensurePool()
   if not pool then return nil, 'Impossible de lire la liste des véhicules.' end
   ensureTransmissions()
-  local eligible = vehLib.eligibleModels(pool, settings.veh)
+  local vs = settings.veh
+  if MPL.group() then
+    -- en groupe : seulement des véhicules officiels (tout le monde les a)
+    vs = {}
+    for k, v in pairs(settings.veh) do vs[k] = v end
+    vs.sources = {officiel = true}
+  end
+  local eligible = vehLib.eligibleModels(pool, vs)
+  if #eligible == 0 and MPL.group() then eligible = vehLib.eligibleModels(pool, {sources = {officiel = true}}) end
   if #eligible == 0 then return nil, 'Aucun véhicule ne correspond à tes filtres (onglet Véhicules).' end
   if next(badModels) then
     -- évite les modèles qui ont déjà échoué au spawn
@@ -865,6 +878,7 @@ local function sessionInfo()
     police = S.policeCtl and {mode = S.policeMode, level = settings.traffic.wantedLevel} or nil,
     summary = S.summary,
     message = S.message,
+    multi = MPL.uiInfo(),
   }
 end
 
@@ -1079,7 +1093,7 @@ end
 -- Le résumé n'est affiché que lorsque l'écran est visible : tout de suite si on reste sur place,
 -- sinon une fois la livraison suivante chargée (après le fondu et le téléport).
 local function queueSummary(payload)
-  local willLoadNext = settings.autoNext or (settings.instantNext and settings.validation ~= 'auto')
+  local willLoadNext = not MPL.group() and (settings.autoNext or (settings.instantNext and settings.validation ~= 'auto'))
   if willLoadNext then
     S.pendingSummary = payload
     S.summaryDelay = nil
@@ -1162,6 +1176,7 @@ local function stopSession(silent)
     setPoiHidden(false)
     if settings.traffic.mode == 'on' and settings.traffic.removeOnStop then trafficCtl.removeOwned() end
     endFade()
+    MPL.leave()
   end
   clearVisuals()
   S = nil
@@ -1191,6 +1206,7 @@ local function planMission(w, l, fromHere)
     isFree = isZoneFree,
     exclude = (S and S.dest) and {[S.dest.id] = true} or nil,
     avoid = recent.places,
+    pickupKinds = MPL.group() and {road = true} or nil,
   }
   if settings.locMode == 'custom' then
     ctx.customMode = true
@@ -1244,11 +1260,16 @@ local function deleteVehicle(id)
   end
 end
 
-local function placeZone(dirSign)
-  local legal = levelData and levelData.legalSide or 1
-  local zone = locLib.zoneFor(S.dest, S.vehW, S.vehL, settings.zoneScale, legal, dirSign or 1, true)
+local function placeZone(dirSign, fixed)
+  local zone
+  if fixed then
+    zone = copyTable(fixed)
+  else
+    local legal = levelData and levelData.legalSide or 1
+    zone = locLib.zoneFor(S.dest, S.vehW, S.vehL, settings.zoneScale, legal, dirSign or 1, true)
+  end
   zone.z = groundZ(zone.x, zone.y, zone.z)
-  S.zone = zone
+  S.zone, S.fixedZone = zone, fixed and true or nil
 end
 
 -- Trafic pendant la livraison : nombre de véhicules (ceux du mod, ou ceux du jeu en « Ne pas toucher »)
@@ -1327,7 +1348,7 @@ local function beginDriving()
   S.vehW, S.vehL = vehicleSize(veh, S.info)
   local plan = S.plan
   S.dest, S.pickup = plan.dest, plan.pickup
-  placeZone(plan.destZone and plan.destZone.dirSign or 1)
+  placeZone(plan.destZone and plan.destZone.dirSign or 1, plan.slotZone)
   S.routeDist = max(plan.dist or 0, 50)
   S.relaxed, S.kindsRelaxed = plan.relaxed, plan.kindsRelaxed
   S.validateTimer, S.validate, S.inZone, S.parkBrake = 0, 0, false, 0
@@ -1361,18 +1382,18 @@ local function beginDriving()
   end
   -- véhicule qui ne rentre pas sur la place (autre véhicule, véhicule de secours après un spawn raté) :
   -- la livraison passe à la place compatible la plus proche, comme pour un changement de véhicule à la main
-  if S.dest and S.dest.kind ~= 'custom' and not locLib.fits(S.dest, S.vehW, S.vehL, settings.zoneScale) and adaptZoneToVehicle() then
+  if S.dest and S.dest.kind ~= 'custom' and not S.fixedZone and not locLib.fits(S.dest, S.vehW, S.vehL, settings.zoneScale) and adaptZoneToVehicle() then
     refreshTimeLimit()
   end
   -- réglage de la police depuis le panneau pendant la livraison (s'il y a des voitures de police)
-  if not S.policeCtl then
+  if not S.policeCtl and not multi.isSession() then
     S.policeCtl = (settings.traffic.mode == 'on' and settings.traffic.police ~= 'off') or trafficCtl.status().police > 0
   end
   trafficCtl.setNpcChases(settings.traffic.npcChases)
   S.waitTraffic = false
   if S.freshTraffic then
     S.freshTraffic = false
-  elseif S.teleported and not quiet then
+  elseif S.teleported and not quiet and not multi.isSession() then
     trafficCtl.scatter()
   end
   S.teleported = false
@@ -1414,6 +1435,7 @@ local function doSpawn()
   local veh
   for attempt = 1, 3 do
     local ok, res = pcall(function()
+      if multi.isSession() then return MPL.spawn(info, p, oldId) end
       if p.fromHere then
         local cur = getPlayerVehicle(0)
         if cur and (cur:getID() == oldId or (S.first and not settings.keepOwnVehicle)) then
@@ -1473,21 +1495,14 @@ local function safeCall(fn, what)
   return ok
 end
 
--- Prépare la mission suivante. opts.fromHere : pas de téléport (départ = position actuelle).
-prepareNext = function(opts)
-  opts = opts or {}
-  if not S then return end
-  local info, err = pickVehicleInfo()
-  if not info then toast('err', err); stopSession(); return end
-  local fromHere = opts.fromHere or (S.first and settings.firstStartHere)
-  local plan, perr = planMission(info.w, info.l, fromHere)
-  if not plan then toast('err', perr); stopSession(); return end
+-- Lance la livraison choisie : écran noir, puis véhicule au départ (fromHere : pas de téléport)
+local function launch(info, plan, fromHere)
   holdFFB(be:getPlayerVehicleID(0))
   holdFFB(S.vehId)
   S.ffbRelease = nil
   clearVisuals()
   S.zone = nil
-  reserveSpot(plan.dest, plan.destZone)
+  reserveSpot(plan.dest, plan.slotZone or plan.destZone)
   S.pending = {info = info, plan = plan, fromHere = fromHere}
   S.summary = nil
   local fs = settings.fade and not fromHere and ensureExt('ui_fadeScreen')
@@ -1501,6 +1516,21 @@ prepareNext = function(opts)
     safeCall(doSpawn, 'spawn')
   end
   sendState()
+end
+
+-- Prépare la mission suivante. opts.fromHere : pas de téléport (départ = position actuelle).
+-- En groupe (multijoueur), seul le chef la choisit ; elle est lancée chez tous à réception.
+prepareNext = function(opts)
+  opts = opts or {}
+  if not S then return end
+  if MPL.group() and not MPL.isLeader() then return end
+  local info, err = pickVehicleInfo()
+  if not info then toast('err', err); stopSession(); return end
+  local fromHere = not MPL.group() and (opts.fromHere or (S.first and settings.firstStartHere))
+  local plan, perr = planMission(info.w, info.l, fromHere)
+  if not plan then toast('err', perr); stopSession(); return end
+  if MPL.group() then return MPL.propose(info, plan) end
+  launch(info, plan, fromHere)
 end
 
 -- données de l'écran de résumé (app indépendante, affichée quelques secondes)
@@ -1563,7 +1593,8 @@ local function deliver()
   clearVisuals()
   ui_message(string.format('Livraison validée ! %s en %s (%.0f km/h de moyenne)%s', fmtDist(dist), fmtTime(time), avg,
     records.avg and ' - Nouveau record !' or ''), 6, 'livraisonLibre', 'info')
-  if settings.instantNext and settings.validation ~= 'auto' then
+  MPL.done('Livrée', time)
+  if settings.instantNext and settings.validation ~= 'auto' and not MPL.group() then
     prepareNext({}) -- validation éclair : livraison suivante directe (le résumé reste affiché à côté)
   else
     sendState()
@@ -1585,6 +1616,7 @@ local function failMission(reason)
   S.phaseTimer = 0
   clearVisuals()
   ui_message(reason .. ' ! Livraison ratée.', 6, 'livraisonLibre', 'warning')
+  MPL.done(reason, perfTime())
   sendState()
 end
 
@@ -1596,6 +1628,7 @@ local function isAdoptable(id)
   local obj = getObjectByID(id)
   if not obj then return false end
   if obj.JBeam == 'unicycle' or obj.isParked == 'true' then return false end
+  if not multi.isOwn(id) then return false end -- véhicule d'un autre joueur (BeamMP)
   if gameplay_walk and gameplay_walk.isWalking and gameplay_walk.isWalking() then return false end
   local gt = gameplay_traffic
   if gt and gt.getTrafficData then
@@ -1610,7 +1643,9 @@ end
 adaptZoneToVehicle = function()
   local moved = false
   local ld = levelData
-  if S.dest and ld and S.dest.kind ~= 'custom' and not locLib.fits(S.dest, S.vehW, S.vehL, settings.zoneScale) then
+  if S.fixedZone then
+    -- en groupe (multijoueur) : chacun garde la place calculée par le chef, à côté de celle des autres
+  elseif S.dest and ld and S.dest.kind ~= 'custom' and not locLib.fits(S.dest, S.vehW, S.vehL, settings.zoneScale) then
     local legal = ld.legalSide or 1
     local c, z = locLib.nearestFitting(ld.cands, S.dest.x, S.dest.y, S.vehW, S.vehL, settings.zoneScale, locFilter(), 800, isZoneFree, legal)
     if not c then
@@ -1624,7 +1659,7 @@ adaptZoneToVehicle = function()
       moved = true
     end
   end
-  if not moved then placeZone(S.zone and S.zone.dirSign or 1) end
+  if not moved and not S.fixedZone then placeZone(S.zone and S.zone.dirSign or 1) end
   reserveSpot()
   setRoute()
   createMarker()
@@ -1920,6 +1955,8 @@ local function onUpdate(dtReal, dtSim, dtRaw)
   if analysis then stepAnalysis() end
   if not S then return end
   dtReal = dtReal or 0
+  MPL.update(dtReal)
+  if not S then return end
   if S.phase == 'fading' then
     S.phaseTimer = S.phaseTimer + dtReal
     if S.blackReached or S.phaseTimer >= 1.4 then safeCall(doSpawn, 'spawn') end
@@ -1941,7 +1978,7 @@ local function onUpdate(dtReal, dtSim, dtRaw)
   elseif S.phase == 'summary' or S.phase == 'failed' then
     S.phaseTimer = S.phaseTimer + dtReal
     local wait = (S.phase == 'summary') and 3.5 or 4.5
-    local chain = settings.autoNext or (settings.instantNext and settings.validation ~= 'auto')
+    local chain = not MPL.group() and (settings.autoNext or (settings.instantNext and settings.validation ~= 'auto'))
     if chain and S.phaseTimer >= wait then prepareNext({}) end
   end
 
@@ -2044,6 +2081,7 @@ local function onExtensionLoaded()
   loadData()
   math.randomseed(os.time())
   log('I', logTag, 'Livraison Libre ' .. VERSION .. ' chargé (' .. #journalRecords .. ' livraisons au journal)')
+  MPL.listen()
 end
 
 local function onExtensionUnloaded()
@@ -2099,6 +2137,286 @@ end
 local function onTrafficOrParkingReady()
   trafficCtl.onReady()
   sendState()
+end
+
+---------------------------------------------------------------------------
+-- multijoueur (BeamMP) : livraisons en groupe
+---------------------------------------------------------------------------
+-- En partie BeamMP, « Lancer » fait rejoindre le groupe (plugin serveur Livraison Libre). Le chef (le premier
+-- arrivé) choisit chaque livraison et l'envoie ; chacun la reçoit avec sa place (départ et arrivée côte à
+-- côte) et le même véhicule, et la fait avec son propre chrono. La suivante part quand tout le groupe a fini.
+-- Sans plugin sur le serveur : livraisons en solo.
+MPL.SAME = 'En multijoueur, la livraison est la même pour tout le groupe.'
+
+function MPL.group() return S ~= nil and S.mp ~= nil and S.mp.joined and not S.mp.solo end
+function MPL.isLeader() return MPL.group() and S.mp.leader ~= nil and S.mp.leader == multi.myId() end
+
+function MPL.leaderName()
+  for _, m in ipairs(S and S.mp and S.mp.members or {}) do
+    if tonumber(m.id) == S.mp.leader then return m.name or '?' end
+  end
+  return '?'
+end
+
+-- messages du serveur (une erreur dans l'un d'eux ne casse rien)
+function MPL.listen()
+  local function wrap(name, fn)
+    return function(t)
+      local ok, err = xpcall(fn, debug.traceback, t)
+      if not ok then log('E', logTag, 'multijoueur (' .. name .. ') : ' .. tostring(err)) end
+    end
+  end
+  local E = multi.EV
+  MPL.listening = multi.listen({
+    [E.group] = wrap('groupe', MPL.onGroup), [E.round] = wrap('livraison', MPL.onRound),
+    [E.result] = wrap('résultat', MPL.onResult), [E.roundEnd] = wrap('fin', MPL.onRoundEnd),
+    [E.full] = wrap('complet', MPL.onFull),
+  }) or MPL.listening
+end
+
+function MPL.join()
+  if not MPL.listening then MPL.listen() end
+  S.mp = {joined = false, solo = false, joinWait = K.MP_JOIN_WAIT, members = {}, results = {}}
+  S.phase = 'waiting'
+  S.message = 'Multijoueur : connexion au groupe…'
+  if not MPL.listening or not multi.send(multi.EV.join, {v = multi.PROTO, name = multi.myName(), level = levelName()}) then
+    S.mp.joinWait = 0 -- BeamMP injoignable : en solo tout de suite
+  end
+  sendState()
+end
+
+function MPL.leave()
+  if S and S.mp and not S.mp.left and multi.isSession() then
+    S.mp.left = true
+    multi.send(multi.EV.leave, {})
+  end
+end
+
+-- pas de plugin sur le serveur, groupe complet, serveur muet : livraisons en solo
+function MPL.solo(msg)
+  if not S or not S.mp then return end
+  local pend = S.mp.pendingPlan
+  MPL.leave() -- (si le serveur a fini par répondre, il ne compte plus sur ce joueur)
+  S.mp.solo, S.mp.joinWait, S.mp.proposeWait, S.mp.pendingPlan = true, nil, nil, nil
+  S.message = nil
+  if msg then toast('warn', msg) end
+  if pend then launch(pend.info, pend.plan, false) else prepareNext({}) end
+end
+
+-- attentes : réponse du serveur, livraison proposée, délai avant la suivante (chef)
+function MPL.update(dt)
+  local mp = S and S.mp
+  if not mp or mp.solo then return end
+  if mp.joinWait then
+    mp.joinWait = mp.joinWait - dt
+    if mp.joinWait <= 0 then MPL.solo('Pas de plugin Livraison Libre sur ce serveur : livraisons en solo.') end
+  elseif mp.proposeWait then
+    mp.proposeWait = mp.proposeWait - dt
+    if mp.proposeWait <= 0 then MPL.solo('Le serveur ne répond pas : livraisons en solo.') end
+  elseif mp.nextIn then
+    mp.nextIn = mp.nextIn - dt
+    if mp.nextIn <= 0 then
+      mp.nextIn = nil
+      if MPL.isLeader() and (S.phase == 'summary' or S.phase == 'failed') then prepareNext({}) end
+    end
+  end
+end
+
+-- places voisines d'une place de parking (même parking : moins de 25 m, parallèles), pour les autres joueurs
+function MPL.nearSpots(c, zone, info)
+  if not c or not c.spotW or c.deadEnd or not levelData then return nil end
+  local w, l = info.w or 2, info.l or 4.8
+  local list = {}
+  for _, o in ipairs(levelData.cands or {}) do
+    if o ~= c and o.spotW and not o.deadEnd and o.kind == c.kind then
+      local dx, dy, dz = o.x - c.x, o.y - c.y, o.z - c.z
+      local d2 = dx * dx + dy * dy
+      if d2 < 625 and abs(dz) < 3 and abs(o.fx * zone.fx + o.fy * zone.fy) > 0.9 and locLib.fits(o, w, l, settings.zoneScale) then
+        list[#list + 1] = {c = o, d2 = d2}
+      end
+    end
+  end
+  table.sort(list, function(a, b) return a.d2 < b.d2 end)
+  local out = {}
+  for _, it in ipairs(list) do
+    local z = locLib.zoneFor(it.c, w, l, settings.zoneScale, levelData.legalSide, 1, true)
+    if z and z.fx * zone.fx + z.fy * zone.fy < 0 then -- même sens que la place du chef
+      z.fx, z.fy, z.fz, z.rx, z.ry, z.rz = -z.fx, -z.fy, -z.fz, -z.rx, -z.ry, -z.rz
+    end
+    if z and isZoneFree(z) then out[#out + 1] = z end
+    if #out >= multi.MAX_SLOTS then break end
+  end
+  return out
+end
+
+-- (chef) livraison choisie : envoyée au serveur, qui la renvoie à tout le groupe avec la place de chacun
+function MPL.propose(info, plan)
+  local function slots(c, zone)
+    local out = {}
+    for i, z in ipairs(multi.slotZones(zone, c, multi.MAX_SLOTS, {near = MPL.nearSpots(c, zone, info)})) do
+      out[i] = multi.packZone(z)
+    end
+    return out
+  end
+  local mission = {
+    v = multi.PROTO, level = levelName(),
+    veh = {model = info.model, config = info.config, name = info.name},
+    pickup = multi.packCand(plan.pickup), dest = multi.packCand(plan.dest),
+    starts = slots(plan.pickup, plan.pickupZone), dests = slots(plan.dest, plan.destZone),
+    dist = plan.dist or 0, relaxed = plan.relaxed or false, kindsRelaxed = plan.kindsRelaxed or false,
+  }
+  S.mp.pendingPlan = {info = info, plan = plan}
+  S.mp.proposeWait = K.MP_PROPOSE_WAIT
+  S.phase = 'waiting'
+  S.message = 'Multijoueur : livraison envoyée au groupe…'
+  if not multi.send(multi.EV.propose, mission) then return MPL.solo('Connexion au serveur perdue : livraisons en solo.') end
+  sendState()
+end
+
+-- emplacement reçu : rattaché au réseau routier de ce joueur (même map, même graphe)
+function MPL.cand(c)
+  if type(c) ~= 'table' or type(c.x) ~= 'number' or type(c.y) ~= 'number' or type(c.z) ~= 'number' then return nil end
+  local o = copyTable(c)
+  o.fx, o.fy, o.fz = tonumber(o.fx) or 0, tonumber(o.fy) or 1, tonumber(o.fz) or 0
+  o.ux, o.uy, o.uz = tonumber(o.ux) or 0, tonumber(o.uy) or 0, tonumber(o.uz) or 1
+  o.off = 0
+  local g = levelData and levelData.g
+  if g then
+    local ei, t, d = graphLib.nearestEdge(g, o.x, o.y, o.z, 200, nil, 20)
+    if ei then
+      o.e, o.t, o.off = ei, t, d or 0
+      o.comp = g.comp[g.edges[ei].a]
+    end
+  end
+  return o
+end
+
+-- véhicule de la livraison du groupe ; absent chez ce joueur (mod) : un véhicule officiel au hasard
+function MPL.vehicle(v)
+  local pool = ensurePool()
+  local pm = type(v) == 'table' and pool and pool.byModel[v.model]
+  if pm then
+    for _, info in ipairs(pm.configs) do
+      if info.config == v.config then return info end
+    end
+  end
+  if type(v) == 'table' and v.model then toast('warn', tostring(v.name or v.model) .. " : pas installé chez toi, tu as un autre véhicule.") end
+  return pickVehicleInfo()
+end
+
+-- (tous) livraison du groupe reçue : sa place au départ et à l'arrivée, le même véhicule que tout le monde
+function MPL.onRound(t)
+  if not S or not S.mp or S.mp.solo then return end
+  local m, slot = t.mission, tonumber(t.slot)
+  if type(m) ~= 'table' or not slot or (m.level and m.level ~= levelName()) then return end
+  if not (levelData and levelData.name == levelName()) then return end
+  local start, dest = multi.unpackZone(m.starts and m.starts[slot]), multi.unpackZone(m.dests and m.dests[slot])
+  local pickup, destC = MPL.cand(m.pickup), MPL.cand(m.dest)
+  if not start or not dest or not pickup or not destC then return MPL.solo('Livraison du groupe illisible : livraisons en solo.') end
+  -- livraison en cours remplacée (le chef est passé à la suivante)
+  if (S.phase == 'driving' or S.phase == 'lost') and not S.recorded then recordMission('Passée') end
+  S.mp.joined, S.mp.joinWait, S.mp.proposeWait, S.mp.pendingPlan = true, nil, nil, nil
+  S.mp.leader = tonumber(t.leader) or S.mp.leader
+  S.mp.round = {id = tonumber(t.round), slot = slot}
+  S.mp.results, S.mp.ended, S.mp.doneSent, S.mp.nextIn = {}, false, false, nil
+  local info = MPL.vehicle(m.veh)
+  if not info then toast('err', 'Aucun véhicule disponible.') return end
+  S.message = nil
+  launch(info, {pickup = pickup, pickupZone = start, dest = destC, destZone = dest, slotZone = dest,
+    dist = tonumber(m.dist) or 0, relaxed = m.relaxed, kindsRelaxed = m.kindsRelaxed}, false)
+end
+
+-- En partie BeamMP : le véhicule du joueur est amené au départ puis remplacé sur place (un nouveau
+-- véhicule en plus de l'ancien dépasserait la limite de véhicules par joueur du serveur)
+function MPL.spawn(info, p, oldId)
+  local cur = (oldId and getObjectByID(oldId)) or getPlayerVehicle(0)
+  if cur and not multi.isOwn(cur:getID()) then cur = nil end
+  local z = (not p.fromHere) and p.plan.pickupZone or nil
+  local pos = z and vec3(z.x, z.y, z.z + 0.3) or nil
+  local rot = z and quatFromDir(vec3(z.fx, z.fy, z.fz), vec3(z.ux, z.uy, z.uz)) or nil
+  if not cur then return core_vehicles.spawnNewVehicle(info.model, spawnOptions(info, pos, rot)) end
+  if pos then spawn.safeTeleport(cur, pos, rot, false, nil, false, true) end
+  return core_vehicles.replaceVehicle(info.model, spawnOptions(info, nil, rot), cur)
+end
+
+-- livraison finie (livrée, ratée, passée) : résultat envoyé au groupe
+function MPL.done(result, time)
+  if not MPL.group() or not S.mp.round or S.mp.doneSent then return end
+  S.mp.doneSent = true
+  multi.send(multi.EV.done, {round = S.mp.round.id, result = result, time = time})
+end
+
+-- passer en groupe : livraison abandonnée, on attend que les autres finissent la leur
+function MPL.skip()
+  if S.phase ~= 'driving' and S.phase ~= 'lost' then return end
+  recordMission('Passée')
+  stats.skipped = (stats.skipped or 0) + 1
+  stats.streak = 0
+  saveStats()
+  MPL.done('Passée', perfTime())
+  trafficCtl.resetPursuit(S.vehId)
+  S.summary = {ok = false, time = perfTime(), total = S.elapsed, reason = 'Livraison passée'}
+  S.phase = 'failed'
+  S.phaseTimer = 0
+  clearVisuals()
+  sendState()
+end
+
+function MPL.onGroup(t)
+  if not S or not S.mp or S.mp.solo then return end
+  S.mp.joined, S.mp.joinWait = true, nil
+  S.mp.leader = tonumber(t.leader)
+  S.mp.members = type(t.members) == 'table' and t.members or {}
+  if S.phase == 'waiting' and not S.mp.proposeWait then
+    if MPL.isLeader() and not t.round then
+      prepareNext({}) -- 1re livraison du groupe
+    else
+      S.message = 'Multijoueur : en attente de la livraison de ' .. MPL.leaderName() .. '…'
+    end
+  elseif MPL.isLeader() and S.mp.ended and not S.mp.nextIn and (S.phase == 'summary' or S.phase == 'failed') then
+    S.mp.nextIn = K.MP_NEXT_DELAY -- devenu chef pendant l'attente : à lui de lancer la suivante
+  end
+  sendState()
+end
+
+function MPL.onResult(t)
+  if not MPL.group() or not S.mp.round or tonumber(t.round) ~= S.mp.round.id then return end
+  local id = tonumber(t.id)
+  S.mp.results[tostring(id)] = {result = t.result, time = tonumber(t.time), name = t.name}
+  if id ~= multi.myId() then
+    local time = tonumber(t.time)
+    local what = (t.result == 'Livrée' and time) and ('a livré en ' .. fmtTime(time)) or ('a fini : ' .. tostring(t.result))
+    ui_message(tostring(t.name or '?') .. ' ' .. what, 5, 'livraisonLibreMp', 'info')
+  end
+  sendState()
+end
+
+function MPL.onRoundEnd(t)
+  if not MPL.group() or not S.mp.round or tonumber(t.round) ~= S.mp.round.id then return end
+  S.mp.ended = true
+  if type(t.results) == 'table' then
+    for k, r in pairs(t.results) do
+      if type(r) == 'table' then S.mp.results[tostring(k)] = {result = r.result, time = tonumber(r.time), name = r.name} end
+    end
+  end
+  if MPL.isLeader() then S.mp.nextIn = K.MP_NEXT_DELAY end
+  sendState()
+end
+
+function MPL.onFull(t)
+  MPL.solo('Groupe complet (' .. tostring(t.max or multi.MAX_SLOTS) .. ' joueurs) : livraisons en solo.')
+end
+
+-- pour l'interface : le groupe, le chef, le classement de la livraison
+function MPL.uiInfo()
+  if not MPL.group() then return nil end
+  local players = multi.ranking(S.mp.members, S.mp.results, multi.myId())
+  local waiting = {}
+  for _, pl in ipairs(players) do
+    if not pl.result and not pl.me then waiting[#waiting + 1] = pl.name end
+  end
+  return {leader = MPL.isLeader(), leaderName = MPL.leaderName(), players = players, waitingFor = waiting,
+    ended = S.mp.ended or false, nextIn = S.mp.nextIn and math.ceil(S.mp.nextIn) or nil}
 end
 
 ---------------------------------------------------------------------------
@@ -2233,11 +2551,13 @@ function M.start()
   end
   if not ensurePool() then toast('err', 'Impossible de lire la liste des véhicules.') return end
   S = newSession()
-  S.trafficPending = settings.traffic.mode ~= 'keep'
+  -- en multijoueur, le mod ne touche ni au trafic ni à la police (chaque véhicule compterait pour le joueur)
+  local mpSession = multi.isSession()
+  S.trafficPending = settings.traffic.mode ~= 'keep' and not mpSession
   -- mode de police de la session : celui des réglages avec le trafic du mod, sinon la police du jeu telle quelle
-  S.policeMode = (settings.traffic.mode == 'on') and settings.traffic.police or 'patrol'
+  S.policeMode = mpSession and 'off' or ((settings.traffic.mode == 'on') and settings.traffic.police or 'patrol')
   if settings.hidePoi then setPoiHidden(true) end
-  prepareNext({})
+  if mpSession then MPL.join() else prepareNext({}) end
 end
 
 function M.stop()
@@ -2252,7 +2572,8 @@ end
 
 -- Abandonne la mission en cours et passe à la suivante (nouveau véhicule + téléport)
 function M.skip()
-  if not S or S.phase == 'fading' or S.phase == 'spawning' then return end
+  if not S or S.phase == 'fading' or S.phase == 'spawning' or S.phase == 'waiting' then return end
+  if MPL.group() then return MPL.skip() end
   if S.phase == 'driving' or S.phase == 'lost' then
     recordMission('Passée')
     stats.skipped = (stats.skipped or 0) + 1
@@ -2265,12 +2586,17 @@ end
 
 function M.next()
   if not S then return end
+  if MPL.group() and not MPL.isLeader() then
+    toast('info', 'Le chef du groupe lance la livraison suivante.')
+    return
+  end
   if S.phase == 'summary' or S.phase == 'failed' then prepareNext({}) end
 end
 
 -- Nouvelle destination depuis la position actuelle, même véhicule
 function M.rerollDestination()
   if not S or S.phase ~= 'driving' then return end
+  if MPL.group() then toast('info', MPL.SAME) return end
   local veh = S.vehId and getObjectByID(S.vehId)
   if not veh then return end
   local plan, err = planMission(S.vehW or 2, S.vehL or 4.8, true)
@@ -2288,6 +2614,7 @@ end
 -- Remplace le véhicule sur place (même destination, même chrono)
 function M.rerollVehicle()
   if not S or (S.phase ~= 'driving' and S.phase ~= 'lost') or not S.dest then return end
+  if MPL.group() then toast('info', MPL.SAME) return end
   -- de préférence un véhicule qui rentre sur la place de livraison
   local info, err
   for _ = 1, 8 do
@@ -2344,6 +2671,10 @@ end
 -- trafic
 function M.applyTrafficNow()
   if S then return end
+  if multi.isSession() then
+    toast('warn', 'En multijoueur, le mod ne crée pas de trafic : chaque voiture compterait comme un véhicule à toi sur le serveur.')
+    return
+  end
   local res, msg = trafficCtl.apply(settings.traffic, levelName())
   if msg then toast(res == 'error' and 'err' or 'warn', msg)
   elseif res == 'skipped' then toast('info', 'Mode « Ne pas toucher » : le trafic actuel est conservé.')

@@ -43,6 +43,7 @@ Parce qu'il tourne toujours entre les mêmes garages. Ici les destinations vienn
 - 💾 **Tous les réglages sauvegardés**, dans un panneau simple : 4 onglets, l'essentiel visible, chaque réglage n'apparaît que si l'option dont il dépend est activée, et les options avancées sont repliées ; pendant une mission, le panneau n'affiche que la mission en cours
 - 🗺️ **Carte dégagée** : les points d'intérêt du jeu (missions, stations, garages) disparaissent de la minimap, de la grande carte et du monde pendant les livraisons
 - 🧩 **Maps de mods** : l'analyse de la map se fait en arrière-plan, étalée sur plusieurs images — le jeu ne se fige pas, même sur une map lourde
+- 👥 **Multijoueur (BeamMP)** : livraisons en groupe — même véhicule, même destination, départs et arrivées côte à côte, classement de chaque livraison (voir plus bas)
 
 <div align="center">
 <img src="screenshots/04_lieux.png" width="260" alt="Onglet Trajet">
@@ -60,6 +61,23 @@ Parce qu'il tourne toujours entre les mêmes garages. Ici les destinations vienn
 4. Règle l'essentiel dans les 4 onglets (**Trajet**, **Véhicules**, **Difficulté**, **Plus**) — le reste est rangé dans « Plus d'options » — puis clique **Lancer les livraisons**.
 
 *(Raccourcis optionnels dans Options › Contrôles › Gameplay : lancer / arrêter, passer la livraison, nouvelle destination, afficher / réduire le panneau.)*
+
+## Multijoueur (BeamMP)
+
+Le même mod marche en solo et en multijoueur : il voit tout seul s'il tourne sur un serveur BeamMP.
+
+**Sur le serveur** (celui qui l'héberge), une seule fois : [télécharge `LivraisonLibre-BeamMP-serveur.zip`](https://github.com/StundZow/better-garage-to-garage/releases/latest/download/LivraisonLibre-BeamMP-serveur.zip) et copie son dossier `Resources` dans le dossier du serveur (celui de BeamMP-Server), en le fusionnant avec celui qui s'y trouve. Il contient :
+- `Resources/Client/LivraisonLibre.zip` : le mod, que le serveur envoie aux joueurs (en partie BeamMP, seuls les mods du serveur sont actifs : BeamMP désactive ta copie personnelle et ne la réactive pas en partant — pour rejouer en solo, réactive Livraison Libre dans le menu **Mods** du jeu) ;
+- `Resources/Server/LivraisonLibre/main.lua` : le plugin qui relie les joueurs.
+
+Redémarre le serveur, puis en jeu chacun ajoute l'app **Livraison Libre** (Échap → **UI Apps**) et clique **Lancer les livraisons** :
+- le premier à lancer est le **chef** : ses réglages (distance, types de lieux, catégories) choisissent chaque livraison ;
+- tout le monde reçoit la même : **même véhicule** (un véhicule officiel, que tout le monde a ; chacun sa peinture), **départs côte à côte** au bord d'une route (à la file sur une route étroite), et **même destination**, avec une place par joueur à côté des autres (places voisines du parking, côte à côte au bord de la route, à la file dans une allée) ;
+- chacun a son chrono, son temps limite (à sa difficulté) et son journal ; l'app affiche le groupe et le **classement** de la livraison, et un message quand un autre joueur livre ;
+- la livraison suivante part pour tout le monde quand **tout le groupe a fini** (livrée, ratée ou abandonnée) ; le chef peut aussi la lancer sans attendre. S'il s'en va, le suivant arrivé devient chef ;
+- un joueur qui lance en cours de route rejoint la livraison en cours, à la place suivante.
+
+En multijoueur, le mod ne crée **ni trafic ni police** (chaque voiture compterait comme un véhicule du joueur sur le serveur), et il remplace ta voiture sur place au lieu d'en faire apparaître une deuxième (limite de véhicules par joueur). Sans le plugin sur le serveur, tu fais tes livraisons en solo.
 
 ## Comment ça marche
 

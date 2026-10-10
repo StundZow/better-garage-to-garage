@@ -41,12 +41,12 @@
     <!-- Mission en cours : uniquement les infos de la mission -->
     <section class="ll-mission" ng-if="sess">
 
-      <div class="ll-prep" ng-if="sess.phase === 'fading' || sess.phase === 'spawning'">
+      <div class="ll-prep" ng-if="sess.phase === 'fading' || sess.phase === 'spawning' || sess.phase === 'waiting'">
         <div class="ll-spinner"></div>
-        <div>{{ sess.loadingTraffic ? 'Chargement du trafic…' : 'Préparation de la livraison…' }}</div>
+        <div>{{ sess.phase === 'waiting' ? (sess.message || 'Multijoueur…') : (sess.loadingTraffic ? 'Chargement du trafic…' : 'Préparation de la livraison…') }}</div>
       </div>
 
-      <div ng-if="sess.vehicle && sess.phase !== 'fading' && sess.phase !== 'spawning'">
+      <div ng-if="sess.vehicle && sess.phase !== 'fading' && sess.phase !== 'spawning' && sess.phase !== 'waiting'">
         <div class="ll-veh">
           <div class="ll-veh-img">
             <img ng-src="{{ sess.vehicle.preview }}" onerror="this.style.visibility='hidden'">
@@ -77,6 +77,19 @@
               <div class="ll-route-val">{{ tr(sess.to.label) }}</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Multijoueur : le groupe et le classement de la livraison -->
+      <div class="ll-group" ng-if="sess.multi && sess.phase !== 'fading' && sess.phase !== 'spawning'">
+        <div class="ll-group-head">
+          <span class="ll-group-title">Groupe · {{ sess.multi.players.length }} joueur{{ sess.multi.players.length > 1 ? 's' : '' }}</span>
+          <span class="ll-group-lead">{{ sess.multi.leader ? 'Tu choisis les livraisons' : ('Chef : ' + sess.multi.leaderName) }}</span>
+        </div>
+        <div class="ll-group-row" ng-repeat="p in sess.multi.players" ng-class="{'ll-group-me': p.me, 'll-group-ok': p.result === 'Livrée', 'll-group-ko': p.result && p.result !== 'Livrée'}">
+          <span class="ll-group-rank">{{ p.rank ? p.rank + '.' : '' }}</span>
+          <span class="ll-group-name">{{ p.me ? 'Toi' : p.name }}</span>
+          <span class="ll-group-state">{{ p.result === 'Livrée' ? fmtTime(p.time) : (p.result || 'en route') }}</span>
         </div>
       </div>
 
@@ -161,7 +174,8 @@
           <span class="ll-result-chrono" ng-if="sess.summary.pursuitTime >= 1"><svg viewBox="0 0 24 24"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.962 8.962 0 0012 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>{{ fmtTime(sess.summary.pursuitTime) }}</span>
         </div>
         <div class="ll-record" ng-if="sess.summary.record"><svg viewBox="0 0 24 24"><path d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94.63 1.5 1.98 2.63 3.61 2.96V19H7v2h10v-2h-4v-3.1c1.63-.33 2.98-1.46 3.61-2.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z"/></svg>Nouveau record !</div>
-        <div class="ll-note" ng-if="state.settings.autoNext || (state.settings.instantNext && state.settings.validation === 'handbrake')">La livraison suivante démarre automatiquement…</div>
+        <div class="ll-note" ng-if="!sess.multi && (state.settings.autoNext || (state.settings.instantNext && state.settings.validation === 'handbrake'))">La livraison suivante démarre automatiquement…</div>
+        <div class="ll-note" ng-if="sess.multi">{{ multiNextText() }}</div>
       </div>
 
       <!-- Véhicule perdu -->
@@ -174,16 +188,16 @@
 
     <!-- Actions de mission : toujours visibles en bas de l'app -->
     <footer class="ll-foot ll-foot-icons" ng-if="sess">
-      <button class="ll-btn ll-btn-ghost" ng-if="sess.phase === 'driving'" ng-click="call('rerollDestination')" title="Nouvelle destination depuis ta position">
+      <button class="ll-btn ll-btn-ghost" ng-if="sess.phase === 'driving' && !sess.multi" ng-click="call('rerollDestination')" title="Nouvelle destination depuis ta position">
         <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z"/></svg>
       </button>
-      <button class="ll-btn ll-btn-ghost" ng-if="sess.phase === 'driving' || sess.phase === 'lost'" ng-click="call('rerollVehicle')" title="Changer de véhicule (même destination)">
+      <button class="ll-btn ll-btn-ghost" ng-if="(sess.phase === 'driving' || sess.phase === 'lost') && !sess.multi" ng-click="call('rerollVehicle')" title="Changer de véhicule (même destination)">
         <svg viewBox="0 0 24 24"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>
       </button>
-      <button class="ll-btn ll-btn-primary" ng-if="sess.phase === 'summary' || sess.phase === 'failed'" ng-click="call('next')" title="Lancer la livraison suivante">
+      <button class="ll-btn ll-btn-primary" ng-if="(sess.phase === 'summary' || sess.phase === 'failed') && (!sess.multi || sess.multi.leader)" ng-click="call('next')" title="{{ sess.multi ? 'Lancer la livraison suivante pour tout le groupe' : 'Lancer la livraison suivante' }}">
         <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
       </button>
-      <button class="ll-btn ll-btn-ghost" ng-if="sess.phase === 'driving' || sess.phase === 'lost'" ng-click="call('skip')" title="Passer cette livraison (nouveau véhicule, nouvelle destination)">
+      <button class="ll-btn ll-btn-ghost" ng-if="sess.phase === 'driving' || sess.phase === 'lost'" ng-click="call('skip')" title="{{ sess.multi ? 'Abandonner cette livraison (le groupe continue)' : 'Passer cette livraison (nouveau véhicule, nouvelle destination)' }}">
         <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
       </button>
       <button class="ll-btn ll-btn-danger" ng-click="call('stop')" title="Arrêter les livraisons">

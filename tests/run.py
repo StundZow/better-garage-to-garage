@@ -3,6 +3,7 @@
     pip install lupa
     python tests/run.py                 # syntaxe + modules + simulation de parties
     python tests/run.py test_sim.lua    # un seul fichier
+    python tests/run.py test_multi.py   # multijoueur BeamMP (plugin serveur + deux joueurs simulés)
 """
 import io
 import os
@@ -14,7 +15,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 
 HERE = os.path.dirname(os.path.abspath(__file__)).replace('\\', '/')
 MOD = os.path.normpath(os.path.join(HERE, '..', 'LivraisonLibre')).replace('\\', '/')
-DEFAULT = ['test_syntax.lua', 'test_pure.lua', 'test_sim.lua']
+DEFAULT = ['test_syntax.lua', 'test_pure.lua', 'test_sim.lua', 'test_multi.py']
 
 
 def new_runtime():
@@ -26,6 +27,19 @@ def new_runtime():
 
 
 def run(script):
+    if script.endswith('.py'):
+        # test orchestré en Python (plusieurs environnements Lua)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(script[:-3], os.path.join(HERE, script))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        try:
+            return mod.main()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print('PY ERROR in', script, ':', e)
+            return False
     lua = new_runtime()
     with open(os.path.join(HERE, script), encoding='utf-8') as f:
         code = f.read()

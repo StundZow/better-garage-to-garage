@@ -844,6 +844,66 @@ do
   check(tc > tf, 'bosse marquée : un pilote lève le pied pour ne pas décoller', string.format('%.1f / %.1f s', tf, tc))
 end
 
+print('-- multijoueur : places côte à côte, messages, classement')
+do
+  local multi = require('/lua/ge/extensions/livraisonLibre/multi')
+  local function zoneAt(c) return loc.zoneFor(c, 1.9, 4.7, 1.3, 1, 1, true) end
+  local function noOverlap(zs)
+    for i = 1, #zs do for j = i + 1, #zs do if multi.overlap(zs[i], zs[j]) or multi.overlap(zs[j], zs[i]) then return false end end end
+    return true
+  end
+  local function lateral(z, c) return (z.x - c.x) * z.rx + (z.y - c.y) * z.ry end
+  local function along(z, c) return (z.x - c.x) * z.fx + (z.y - c.y) * z.fy end
+  -- route large (16 m) : 4 joueurs côte à côte sur la largeur
+  local wide = {kind = 'road', x = 0, y = 0, z = 10, fx = 0, fy = 1, fz = 0, ux = 0, uy = 0, uz = 1, half = 8}
+  local zs = multi.slotZones(zoneAt(wide), wide, 4)
+  local inRoad, sameRow = true, true
+  for _, z in ipairs(zs) do
+    if math.abs(lateral(z, wide)) > wide.half - z.w * 0.5 - 0.15 + 1e-6 then inRoad = false end
+    if math.abs(along(z, wide)) > 1e-6 then sameRow = false end
+  end
+  check(#zs == 4 and noOverlap(zs) and inRoad and sameRow, 'route large : 4 joueurs côte à côte, sur la route, sans chevauchement')
+  -- route à double sens de 8,4 m : deux de front, le 3e derrière le 1er
+  local two = {kind = 'road', x = 0, y = 0, z = 10, fx = 0, fy = 1, fz = 0, ux = 0, uy = 0, uz = 1, half = 4.2}
+  zs = multi.slotZones(zoneAt(two), two, 3)
+  check(math.abs(along(zs[2], two)) < 1e-6 and along(zs[3], two) < -zs[1].l and math.abs(lateral(zs[3], two) - lateral(zs[1], two)) < 1e-6
+    and noOverlap(zs), 'route à deux voies : deux de front, le 3e derrière', string.format('%.2f / %.2f', along(zs[3], two), lateral(zs[3], two)))
+  -- route étroite (5 m) : à la file
+  local narrow = {kind = 'road', x = 0, y = 0, z = 10, fx = 0, fy = 1, fz = 0, ux = 0, uy = 0, uz = 1, half = 2.5}
+  zs = multi.slotZones(zoneAt(narrow), narrow, 3)
+  check(along(zs[2], narrow) < -zs[1].l and along(zs[3], narrow) < along(zs[2], narrow) - zs[1].l and noOverlap(zs),
+    'route étroite : les suivants à la file, derrière')
+  -- parking : d'abord les places voisines connues (sauf celle déjà prise), puis à côté
+  local park = {kind = 'parking', x = 50, y = 0, z = 10, fx = 0, fy = 1, fz = 0, ux = 0, uy = 0, uz = 1, spotW = 2.6, spotL = 6}
+  local pz = zoneAt(park)
+  local nb = {}
+  for k, v in pairs(pz) do nb[k] = v end
+  nb.x = pz.x + pz.rx * 2.7
+  zs = multi.slotZones(pz, park, 4, {near = {pz, nb}})
+  check(zs[2] == nb and noOverlap(zs) and #zs == 4, 'parking : place voisine du même parking, puis à côté (jamais la même)')
+  -- allée : les suivants vers la rue, même si la voiture du chef est tournée vers la rue
+  local home = {kind = 'home', deadEnd = true, x = 0, y = 100, z = 10, fx = 0, fy = 1, fz = 0, ux = 0, uy = 0, uz = 1, half = 2, depth = 20, edgeLen = 20}
+  local hz = zoneAt(home)
+  hz.fx, hz.fy, hz.rx, hz.ry = -hz.fx, -hz.fy, -hz.rx, -hz.ry
+  zs = multi.slotZones(hz, home, 3)
+  check(zs[2].y < hz.y - hz.l and zs[3].y < zs[2].y - hz.l, 'allée : les suivants vers la rue', string.format('%.1f / %.1f', zs[2].y, hz.y))
+  -- messages : nombres et texte seulement, relus à l'identique
+  local packed = multi.packZone(zoneAt(wide))
+  local back = multi.unpackZone(packed)
+  check(back and back.x == packed.x and back.w == packed.w and back.fx == packed.fx and back.uz == 1, 'zone : relue à l\'identique')
+  local pc = multi.packCand({kind = 'parking', x = 1, y = 2, z = 3, ps = {vehicle = 4}, label = 'P', bad = function() end, half = 0 / 0})
+  check(pc.ps == nil and pc.bad == nil and pc.half == nil and pc.label == 'P' and pc.x == 1, 'emplacement : sans les champs non transmissibles')
+  check(multi.unpackZone({x = 1, y = 2}) == nil, 'zone incomplète : refusée')
+  -- classement : livrés du plus rapide au plus lent, puis les autres
+  local r = multi.ranking({{id = 1, name = 'Bob'}, {id = 2, name = 'Alice'}, {id = 3, name = 'Chloé'}, {id = 4, name = 'Dan'}},
+    {['1'] = {result = 'Livrée', time = 80}, ['3'] = {result = 'Livrée', time = 70}, ['2'] = {result = 'Passée'}}, 1)
+  check(r[1].name == 'Chloé' and r[1].rank == 1 and r[2].name == 'Bob' and r[2].rank == 2 and r[2].me and r[3].name == 'Alice'
+    and not r[3].rank and r[4].name == 'Dan' and not r[4].result, 'classement de la livraison du groupe')
+  -- hors BeamMP : rien n'est envoyé, tous les véhicules sont à soi
+  check(not multi.isSession() and multi.isOwn(5) and multi.send('LL_join', {}) == false and multi.myId() == nil,
+    'hors BeamMP : pas de session, aucun message')
+end
+
 print('-- trajet routier (graph.route)')
 local gr = graph.build((citygen.city(9, 120)))
 local spots = loc.buildRoadSpots(gr)

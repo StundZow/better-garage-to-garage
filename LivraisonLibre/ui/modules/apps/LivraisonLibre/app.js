@@ -346,6 +346,14 @@ angular.module('beamng.apps')
         if (v < 0.7) return 'Normale'
         return 'Stricte'
       }
+      // multijoueur : qui on attend avant la livraison suivante
+      scope.multiNextText = function () {
+        var mp = scope.sess && scope.sess.multi
+        if (!mp) return ''
+        if (mp.waitingFor && mp.waitingFor.length) return 'En attente de : ' + mp.waitingFor.join(', ')
+        if (mp.leader) return mp.nextIn ? 'Livraison suivante pour tout le groupe dans ' + mp.nextIn + ' s…' : 'Livraison suivante pour tout le groupe…'
+        return 'Le chef (' + mp.leaderName + ') lance la livraison suivante…'
+      }
       scope.hasTimeLeft = function () {
         return scope.hud && scope.hud.timeLeft !== undefined && scope.hud.timeLeft !== null
       }

@@ -474,7 +474,7 @@ end
 
 --[[
 ctx = {
-  g, cands, filter = {kinds, paved, pavedThreshold, avoidHighways},
+  g, cands, filter = {kinds, paved, pavedThreshold, avoidHighways}, pickupKinds = {kind = true} | nil (départ),
   minD, maxD, vehW, vehL, scale, legalSide, rng = function(n) -> 1..n,
   from = {x,y,z,e,t,off} | nil  -> départ fixe (position actuelle)
   isFree = function(zone, cand) -> bool | nil
@@ -536,6 +536,12 @@ function M.pickMission(ctx)
       if cl >= minCompLen or c.comp == g.mainComp then pickPool[#pickPool + 1] = c end
     end
     if #pickPool == 0 then pickPool = pool end
+  end
+  -- départ réservé à certains types de lieux (en groupe : au bord d'une route, pour s'y garer côte à côte)
+  if ctx.pickupKinds and not ctx.customMode then
+    local only = {}
+    for _, c in ipairs(pickPool) do if ctx.pickupKinds[c.kind] then only[#only + 1] = c end end
+    if #only > 0 then pickPool = only end
   end
 
   local function mission(pickup, pZone, item, zone, relaxed)
