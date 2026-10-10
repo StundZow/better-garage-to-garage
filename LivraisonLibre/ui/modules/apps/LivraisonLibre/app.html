@@ -483,6 +483,17 @@
 
       <!-- ===== Plus : stats et paramètres ===== -->
       <div ng-if="ui.tab === 'plus'" class="ll-pane">
+        <div class="ll-section" ng-if="state.mp">
+          <div class="ll-section-title">Jouer avec</div>
+          <div class="ll-hint">Les joueurs cochés reçoivent tes livraisons : quand tu lances, elles démarrent aussi chez eux (même véhicule, départs côte à côte).</div>
+          <div class="ll-empty" ng-if="!state.mp.plugin">Recherche des joueurs… (il faut le plugin Livraison Libre sur le serveur)</div>
+          <div class="ll-empty" ng-if="state.mp.plugin && !state.mp.players.length">Aucun autre joueur sur le serveur.</div>
+          <div class="ll-row" ng-repeat="p in state.mp.players track by p.name">
+            <div><div class="ll-row-title">{{ p.name }}</div><div class="ll-hint" ng-if="p.inGroup">Dans le groupe</div></div>
+            <label class="ll-switch"><input type="checkbox" ng-model="p.invited" ng-change="call2('setMpInvite', p.name, p.invited)"><span></span></label>
+          </div>
+        </div>
+
         <div class="ll-tiles">
           <div class="ll-tile ll-tile-accent"><b>{{ st.delivered || 0 }}</b><span>Livraisons</span></div>
           <div class="ll-tile"><b>{{ (st.bestAvg || 0) | number:0 }} km/h</b><span>Meilleure moyenne</span></div>

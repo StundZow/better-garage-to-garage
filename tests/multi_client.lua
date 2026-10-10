@@ -46,6 +46,14 @@ function MP_drain()
   return out
 end
 
+-- tous les messages de l'app (pas seulement le dernier)
+env.toasts = {}
+local origTrigger = guihooks.trigger
+guihooks.trigger = function(name, data)
+  if name == 'LivraisonLibreToast' and type(data) == 'table' then table.insert(env.toasts, data.msg) end
+  return origTrigger(name, data)
+end
+
 M = dofile(MOD_ROOT .. '/lua/ge/extensions/livraisonLibre.lua')
 livraisonLibre = M
 ENV = env
@@ -66,6 +74,10 @@ function frames(n, dt)
     if env.fadeBlackPending then
       env.fadeBlackPending = env.fadeBlackPending - 1
       if env.fadeBlackPending <= 0 then env.fadeBlackPending = nil; M.onScreenFadeState(1) end
+    end
+    if env.trafficReadyIn then
+      env.trafficReadyIn = env.trafficReadyIn - 1
+      if env.trafficReadyIn <= 0 then env.trafficReadyIn = nil; env.traffic.state = 'on'; M.onTrafficOrParkingReady() end
     end
     M.onUpdate(dt, dt, dt)
     M.onPreRender(dt, dt, dt)

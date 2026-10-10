@@ -223,6 +223,7 @@ angular.module('beamng.apps')
       scope.start = function () { flushPush(); api('start') }
       scope.call = function (fn) { flushPush(); api(fn) }
       scope.callArg = function (fn, a) { flushPush(); api(fn, a) }
+      scope.call2 = function (fn, a, b) { flushPush(); api(fn, a, b) }
       scope.toggleCollapsed = function () {
         scope.ui.collapsed = !scope.ui.collapsed
         saveUi()

@@ -32,9 +32,13 @@ BeamMP-Server), en le fusionnant avec le dossier Resources qui s'y trouve :
 Puis redémarre le serveur.
 
 En jeu, chacun ouvre l'app Livraison Libre (menu des apps de l'interface) et clique sur
-« Lancer les livraisons ». Le premier à lancer choisit les livraisons (le chef) ; les autres reçoivent
-la même : même véhicule, départs et arrivées côte à côte. La livraison suivante part quand tout le
-groupe a fini (livrée, ratée ou passée). En multijoueur, le mod ne crée ni trafic ni police.
+« Lancer les livraisons », ou un joueur coche ses amis dans l'onglet Plus (« Jouer avec ») : quand il
+lance, les livraisons démarrent aussi chez eux. Le premier à lancer choisit les livraisons (le chef) ;
+les autres reçoivent la même : même véhicule, départs et arrivées côte à côte. La livraison suivante
+part quand tout le groupe a fini (livrée, ratée ou passée).
+
+Trafic : chaque voiture du trafic du mod compte comme un véhicule du joueur sur le serveur. Monte
+MaxCars dans ServerConfig.toml (par exemple MaxCars = 30).
 '''
 with zipfile.ZipFile(MP_OUT, 'w', zipfile.ZIP_DEFLATED) as zf:
     zf.write(OUT, 'Resources/Client/LivraisonLibre.zip')

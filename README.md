@@ -70,14 +70,14 @@ Le même mod marche en solo et en multijoueur : il voit tout seul s'il tourne su
 - `Resources/Client/LivraisonLibre.zip` : le mod, que le serveur envoie aux joueurs (en partie BeamMP, seuls les mods du serveur sont actifs : BeamMP désactive ta copie personnelle et ne la réactive pas en partant — pour rejouer en solo, réactive Livraison Libre dans le menu **Mods** du jeu) ;
 - `Resources/Server/LivraisonLibre/main.lua` : le plugin qui relie les joueurs.
 
-Redémarre le serveur, puis en jeu chacun ajoute l'app **Livraison Libre** (Échap → **UI Apps**) et clique **Lancer les livraisons** :
+Redémarre le serveur, puis en jeu chacun ajoute l'app **Livraison Libre** (Échap → **UI Apps**) et clique **Lancer les livraisons** — ou plus simple : dans l'onglet **Plus**, section **Jouer avec**, coche tes amis. Quand tu lances, les livraisons démarrent aussi chez eux, sans qu'ils aient rien à faire (ils reçoivent un message), et ton choix est gardé pour la prochaine fois :
 - le premier à lancer est le **chef** : ses réglages (distance, types de lieux, catégories) choisissent chaque livraison ;
 - tout le monde reçoit la même : **même véhicule** (un véhicule officiel, que tout le monde a ; chacun sa peinture), **départs côte à côte** au bord d'une route (à la file sur une route étroite), et **même destination**, avec une place par joueur à côté des autres (places voisines du parking, côte à côte au bord de la route, à la file dans une allée) ;
 - chacun a son chrono, son temps limite (à sa difficulté) et son journal ; l'app affiche le groupe et le **classement** de la livraison, et un message quand un autre joueur livre ;
 - la livraison suivante part pour tout le monde quand **tout le groupe a fini** (livrée, ratée ou abandonnée) ; le chef peut aussi la lancer sans attendre. S'il s'en va, le suivant arrivé devient chef ;
 - un joueur qui lance en cours de route rejoint la livraison en cours, à la place suivante.
 
-En multijoueur, le mod ne crée **ni trafic ni police** (chaque voiture compterait comme un véhicule du joueur sur le serveur), et il remplace ta voiture sur place au lieu d'en faire apparaître une deuxième (limite de véhicules par joueur). Sans le plugin sur le serveur, tu fais tes livraisons en solo.
+En multijoueur, le **trafic du mod** marche aussi : chaque joueur crée le sien, avec ses propres réglages. Chaque voiture du trafic, de police ou garée compte comme un véhicule du joueur sur le serveur : monte `MaxCars` dans le `ServerConfig.toml` du serveur (par exemple `MaxCars = 30`), sinon le serveur refuse les voitures en trop. Pour ta voiture de livraison, le mod remplace ta voiture sur place au lieu d'en faire apparaître une deuxième. Sans le plugin sur le serveur, tu fais tes livraisons en solo.
 
 ## Comment ça marche
 

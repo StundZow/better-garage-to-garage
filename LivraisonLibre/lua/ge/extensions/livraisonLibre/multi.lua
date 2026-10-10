@@ -8,12 +8,14 @@
 
 local M = {}
 
-M.PROTO = 1
+M.PROTO = 2
 M.MAX_SLOTS = 8 -- joueurs par groupe (places calculées pour chaque livraison)
 -- messages : client -> serveur, puis serveur -> client
 M.EV = {
   join = 'LL_join', leave = 'LL_leave', propose = 'LL_propose', done = 'LL_done',
+  players = 'LL_players', invite = 'LL_invite',
   group = 'LL_group', round = 'LL_round', result = 'LL_result', roundEnd = 'LL_roundEnd', full = 'LL_full',
+  playerList = 'LL_playerList', invited = 'LL_invited',
 }
 
 local floor, max, abs = math.floor, math.max, math.abs

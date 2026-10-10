@@ -14,7 +14,7 @@ local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 local timing = require('/lua/ge/extensions/livraisonLibre/timing')
 local multi = require('/lua/ge/extensions/livraisonLibre/multi')
 
-local VERSION = '1.8.0'
+local VERSION = '1.9.0'
 local DATA_DIR = '/settings/livraisonLibre/'
 local DECAL_TEXTURE = 'art/shapes/interface/parkDecalStripes.png'
 -- réglages internes (regroupés : le fichier approche la limite de 200 variables locales de Lua)
@@ -43,6 +43,7 @@ K.FFB_RELEASE_DELAY = 1.5    -- s après le retour de l'image avant de rendre le
 K.MP_JOIN_WAIT = 4           -- s : réponse du serveur BeamMP attendue (sinon : pas de plugin, livraisons en solo)
 K.MP_PROPOSE_WAIT = 6        -- s : livraison du chef renvoyée par le serveur à tout le groupe
 K.MP_NEXT_DELAY = 6          -- s : tout le groupe a fini, résultats affichés avant la livraison suivante
+K.MP_INVITE_WAIT = 30        -- s : le chef attend les joueurs invités avant la 1re livraison (analyse de la map chez eux)
 
 local abs, min, max, sqrt, floor = math.abs, math.min, math.max, math.sqrt, math.floor
 
@@ -201,6 +202,18 @@ local function mergeInto(dst, src, tpl)
   return dst
 end
 
+-- joueurs choisis pour recevoir mes livraisons en multijoueur (par pseudo) : dans settings.json, mais à part
+-- des réglages envoyés par l'interface (elle les change par setMpInvite)
+local function cleanInvite(t)
+  local out, n = {}, 0
+  if type(t) == 'table' then
+    for name, on in pairs(t) do
+      if on == true and type(name) == 'string' and name ~= '' and n < 32 then out[name], n = true, n + 1 end
+    end
+  end
+  return out
+end
+
 local function oneOf(v, allowed, default)
   for _, a in ipairs(allowed) do if v == a then return v end end
   return default
@@ -295,6 +308,7 @@ local function loadData()
   local saved = jsonReadFile(K.SETTINGS_FILE)
   if type(saved) == 'table' then mergeInto(settings, saved, DEFAULTS) end
   sanitizeSettings(settings)
+  settings.mpInvite = cleanInvite(type(saved) == 'table' and saved.mpInvite)
 
   stats = copyTable(STATS_DEFAULTS)
   local savedStats = jsonReadFile(K.STATS_FILE)
@@ -931,6 +945,7 @@ local function buildState()
     traffic = trafficCtl.status(),
     journal = journalInfo(),
     points = pointsForUI(),
+    mp = MPL.mpInfo(),
     meta = UI_META,
   }
 end
@@ -1386,14 +1401,14 @@ local function beginDriving()
     refreshTimeLimit()
   end
   -- réglage de la police depuis le panneau pendant la livraison (s'il y a des voitures de police)
-  if not S.policeCtl and not multi.isSession() then
+  if not S.policeCtl then
     S.policeCtl = (settings.traffic.mode == 'on' and settings.traffic.police ~= 'off') or trafficCtl.status().police > 0
   end
   trafficCtl.setNpcChases(settings.traffic.npcChases)
   S.waitTraffic = false
   if S.freshTraffic then
     S.freshTraffic = false
-  elseif S.teleported and not quiet and not multi.isSession() then
+  elseif S.teleported and not quiet then
     trafficCtl.scatter()
   end
   S.teleported = false
@@ -1953,6 +1968,7 @@ end
 ---------------------------------------------------------------------------
 local function onUpdate(dtReal, dtSim, dtRaw)
   if analysis then stepAnalysis() end
+  MPL.keepListening(dtReal or 0)
   if not S then return end
   dtReal = dtReal or 0
   MPL.update(dtReal)
@@ -2171,7 +2187,74 @@ function MPL.listen()
     [E.group] = wrap('groupe', MPL.onGroup), [E.round] = wrap('livraison', MPL.onRound),
     [E.result] = wrap('résultat', MPL.onResult), [E.roundEnd] = wrap('fin', MPL.onRoundEnd),
     [E.full] = wrap('complet', MPL.onFull),
+    [E.playerList] = wrap('joueurs', MPL.onPlayerList), [E.invited] = wrap('invitation', MPL.onInvited),
   }) or MPL.listening
+end
+
+-- en partie BeamMP, écoute le serveur même sans livraison en cours (invitations, liste des joueurs)
+function MPL.keepListening(dt)
+  if MPL.listening then return end
+  MPL.retry = (MPL.retry or 0) - dt
+  if MPL.retry > 0 then return end
+  MPL.retry = 2
+  if multi.isSession() then MPL.listen() end
+end
+
+-- liste des joueurs connectés, demandée au serveur (onglet Plus) ; il la renvoie aussi à chaque arrivée et départ
+function MPL.askPlayers()
+  if not multi.isSession() or not MPL.listening then return end
+  local now = os.clock()
+  if MPL.askedAt and now - MPL.askedAt < 2 then return end
+  MPL.askedAt = now
+  multi.send(multi.EV.players, {})
+end
+
+function MPL.onPlayerList(t)
+  MPL.players = type(t.players) == 'table' and t.players or {}
+  MPL.pluginSeen = true
+  sendState()
+end
+
+-- autres joueurs pour l'onglet Plus : qui reçoit mes livraisons (coché), qui est déjà dans le groupe
+function MPL.mpInfo()
+  if not multi.isSession() then return nil end
+  local me, out = multi.myId(), {}
+  for _, p in ipairs(MPL.players or {}) do
+    local id = tonumber(p.id)
+    if id and id ~= me and type(p.name) == 'string' then
+      out[#out + 1] = {id = id, name = p.name, invited = settings.mpInvite[p.name] == true, inGroup = p.inGroup == true}
+    end
+  end
+  return {players = out, plugin = MPL.pluginSeen == true}
+end
+
+-- joueurs cochés : invités (ceux qui ne sont pas encore dans le groupe lancent les livraisons chez eux)
+function MPL.invite(names)
+  if #names > 0 then multi.send(multi.EV.invite, {names = names}) end
+end
+
+function MPL.selected()
+  local names = {}
+  for name, on in pairs(settings.mpInvite or {}) do
+    if on == true then names[#names + 1] = name end
+  end
+  table.sort(names)
+  return names
+end
+
+-- invitation d'un autre joueur : les livraisons démarrent ici aussi, dans son groupe
+function MPL.onInvited(t)
+  if S or not multi.isSession() then return end
+  local from = type(t.name) == 'string' and t.name or 'Un joueur'
+  ui_message(from .. ' joue avec toi : livraisons lancées.', 6, 'livraisonLibreMp', 'info')
+  M.start()
+end
+
+-- en multijoueur, chaque voiture du trafic compte dans la limite de véhicules par joueur du serveur
+function MPL.trafficNote()
+  if MPL.trafficNoted then return end
+  MPL.trafficNoted = true
+  toast('info', 'Multijoueur : chaque voiture du trafic compte dans la limite de véhicules par joueur du serveur (MaxCars).')
 end
 
 function MPL.join()
@@ -2179,7 +2262,9 @@ function MPL.join()
   S.mp = {joined = false, solo = false, joinWait = K.MP_JOIN_WAIT, members = {}, results = {}}
   S.phase = 'waiting'
   S.message = 'Multijoueur : connexion au groupe…'
-  if not MPL.listening or not multi.send(multi.EV.join, {v = multi.PROTO, name = multi.myName(), level = levelName()}) then
+  -- (les joueurs choisis partent avec la demande : le serveur les invite avant de répondre, et le chef les attend)
+  local join = {v = multi.PROTO, name = multi.myName(), level = levelName(), invite = MPL.selected()}
+  if not MPL.listening or not multi.send(multi.EV.join, join) then
     S.mp.joinWait = 0 -- BeamMP injoignable : en solo tout de suite
   end
   sendState()
@@ -2218,6 +2303,12 @@ function MPL.update(dt)
     if mp.nextIn <= 0 then
       mp.nextIn = nil
       if MPL.isLeader() and (S.phase == 'summary' or S.phase == 'failed') then prepareNext({}) end
+    end
+  elseif mp.inviteWait and mp.inviteWait > 0 then
+    mp.inviteWait = mp.inviteWait - dt
+    if mp.inviteWait <= 0 and MPL.isLeader() and S.phase == 'waiting' then
+      S.message = nil
+      prepareNext({}) -- les invités en retard rejoindront la livraison en cours
     end
   end
 end
@@ -2368,7 +2459,14 @@ function MPL.onGroup(t)
   S.mp.leader = tonumber(t.leader)
   S.mp.members = type(t.members) == 'table' and t.members or {}
   if S.phase == 'waiting' and not S.mp.proposeWait then
-    if MPL.isLeader() and not t.round then
+    -- invités pas encore arrivés : le chef les attend un moment avant la 1re livraison
+    local waitFor = {}
+    for _, n in pairs(type(t.invited) == 'table' and t.invited or {}) do waitFor[#waitFor + 1] = tostring(n) end
+    if MPL.isLeader() and not t.round and #waitFor > 0 and (S.mp.inviteWait or 1) > 0 then
+      S.mp.inviteWait = S.mp.inviteWait or K.MP_INVITE_WAIT
+      S.message = 'Multijoueur : en attente de ' .. table.concat(waitFor, ', ') .. '…'
+    elseif MPL.isLeader() and not t.round then
+      S.mp.inviteWait = nil
       prepareNext({}) -- 1re livraison du groupe
     else
       S.message = 'Multijoueur : en attente de la livraison de ' .. MPL.leaderName() .. '…'
@@ -2422,7 +2520,19 @@ end
 ---------------------------------------------------------------------------
 -- API appelée par l'interface
 ---------------------------------------------------------------------------
-function M.requestState() sendState() end
+function M.requestState()
+  MPL.askPlayers()
+  sendState()
+end
+
+-- multijoueur : coche ou décoche un joueur qui reçoit mes livraisons (invité tout de suite si elles tournent)
+function M.setMpInvite(name, on)
+  if type(name) ~= 'string' or name == '' then return end
+  settings.mpInvite[name] = (on == true) or nil
+  saveSettings()
+  if on == true and S and S.mp and not S.mp.solo and not S.mp.left then MPL.invite({name}) end
+  sendState()
+end
 
 function M.requestMapInfo()
   analyzeLevel(function(ld, err)
@@ -2508,9 +2618,9 @@ end
 
 function M.resetSettings()
   if S then return end
-  local bl, ui = settings.veh.blacklist, settings.ui
+  local bl, ui, inv = settings.veh.blacklist, settings.ui, settings.mpInvite
   settings = copyTable(DEFAULTS)
-  settings.veh.blacklist, settings.ui = bl, ui
+  settings.veh.blacklist, settings.ui, settings.mpInvite = bl, ui, inv
   saveSettings()
   sendState()
 end
@@ -2551,11 +2661,12 @@ function M.start()
   end
   if not ensurePool() then toast('err', 'Impossible de lire la liste des véhicules.') return end
   S = newSession()
-  -- en multijoueur, le mod ne touche ni au trafic ni à la police (chaque véhicule compterait pour le joueur)
+  -- trafic du mod, en solo comme en multijoueur (chaque joueur crée le sien, avec ses réglages)
   local mpSession = multi.isSession()
-  S.trafficPending = settings.traffic.mode ~= 'keep' and not mpSession
+  S.trafficPending = settings.traffic.mode ~= 'keep'
+  if mpSession and settings.traffic.mode == 'on' then MPL.trafficNote() end
   -- mode de police de la session : celui des réglages avec le trafic du mod, sinon la police du jeu telle quelle
-  S.policeMode = mpSession and 'off' or ((settings.traffic.mode == 'on') and settings.traffic.police or 'patrol')
+  S.policeMode = (settings.traffic.mode == 'on') and settings.traffic.police or 'patrol'
   if settings.hidePoi then setPoiHidden(true) end
   if mpSession then MPL.join() else prepareNext({}) end
 end
@@ -2671,10 +2782,7 @@ end
 -- trafic
 function M.applyTrafficNow()
   if S then return end
-  if multi.isSession() then
-    toast('warn', 'En multijoueur, le mod ne crée pas de trafic : chaque voiture compterait comme un véhicule à toi sur le serveur.')
-    return
-  end
+  if multi.isSession() and settings.traffic.mode == 'on' then MPL.trafficNote() end
   local res, msg = trafficCtl.apply(settings.traffic, levelName())
   if msg then toast(res == 'error' and 'err' or 'warn', msg)
   elseif res == 'skipped' then toast('info', 'Mode « Ne pas toucher » : le trafic actuel est conservé.')

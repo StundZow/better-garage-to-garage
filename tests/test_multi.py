@@ -14,6 +14,8 @@ ROOT = os.path.dirname(HERE)
 MOD = ROOT + '/LivraisonLibre'
 PLUGIN = ROOT + '/BeamMP/Resources/Server/LivraisonLibre/main.lua'
 
+PROTO = 2  # version des messages du mod et du plugin
+
 passed = failed = 0
 
 
@@ -46,6 +48,7 @@ MP = {}
 function MP.RegisterEvent(ev, fname) HANDLERS[ev] = fname end
 function MP.TriggerClientEvent(id, ev, data) OUT[#OUT + 1] = {id = id, ev = ev, data = data}; return true end
 function MP.GetPlayerName(id) return PLAYERS[id] end
+function MP.GetPlayers() local t = {} for id, n in pairs(PLAYERS) do t[id] = n end return t end
 function MP.SendChatMessage(id, msg) CHAT[#CHAT + 1] = {id = id, msg = msg} end
 local json = dofile(TEST_DIR .. '/json_lite.lua')
 Util = {JsonEncode = json.encode, JsonDecode = json.decode}
@@ -73,6 +76,7 @@ class Server:
 
     def disconnect(self, pid):
         self.event('onPlayerDisconnect', pid, None)
+        self.lua.globals()['PLAYERS'][pid] = None
 
     def drain(self):
         return [(m['id'], m['ev'], m['data']) for m in values(self.lua.globals()['SRV_drain']())]
@@ -130,6 +134,15 @@ class Client:
     def messages(self):
         return values(self.g['ENV']['messages'])
 
+    def toasts(self):
+        return values(self.g['ENV']['toasts'])
+
+    def state(self):
+        return self.g['state']()
+
+    def saved_settings(self):
+        return self.g['ENV']['files']['/settings/livraisonLibre/settings.json']
+
 
 class Net:
     """faux serveur BeamMP : achemine les messages entre les joueurs et le plugin"""
@@ -186,12 +199,12 @@ def test_plugin():
     for pid, name in ((0, 'Alice'), (1, 'Bob'), (2, 'Chloé'), (3, 'Dan')):
         s.connect(pid, name)
     enc = s.encode
-    s.event('LL_join', 0, enc({'v': 1}))
-    out = s.drain()
-    check(len(out) == 1 and out[0][1] == 'LL_group' and out[0][0] == 0, 'premier joueur : groupe envoyé', out)
+    s.event('LL_join', 0, enc({'v': PROTO}))
+    out = [o for o in s.drain() if o[1] == 'LL_group']
+    check(len(out) == 1 and out[0][0] == 0, 'premier joueur : groupe envoyé', out)
     g = s.decode(out[0][2])
     check(g['leader'] == 0 and len(values(g['members'])) == 1, 'premier joueur : chef', g and dict(g))
-    s.event('LL_join', 1, enc({'v': 1}))
+    s.event('LL_join', 1, enc({'v': PROTO}))
     out = s.drain()
     check(sorted(o[0] for o in out if o[1] == 'LL_group') == [0, 1], 'deuxième joueur : groupe envoyé aux deux', out)
     s.event('LL_propose', 1, enc({'level': 'x'}))
@@ -216,7 +229,7 @@ def test_plugin():
     ends = [s.decode(o[2]) for o in out if o[1] == 'LL_roundEnd']
     check(len(ends) == 2 and ends[0]['results']['1']['result'] == 'Livrée' and ends[0]['results']['0']['result'] == 'Temps écoulé',
           'tout le groupe a fini : fin de la livraison avec les résultats', out)
-    s.event('LL_join', 2, enc({'v': 1}))
+    s.event('LL_join', 2, enc({'v': PROTO}))
     out = s.drain()
     check([o for o in out if o[1] == 'LL_group'] and not [o for o in out if o[1] == 'LL_round'],
           'arrivée après la fin d\'une livraison : groupe, pas de livraison en cours')
@@ -224,7 +237,7 @@ def test_plugin():
     rounds = {o[0]: s.decode(o[2]) for o in s.drain() if o[1] == 'LL_round'}
     check({k: v['slot'] for k, v in rounds.items()} == {0: 1, 1: 2, 2: 3} and rounds[2]['round'] == 2,
           'livraison 2 : places dans l\'ordre d\'arrivée', {k: v['slot'] for k, v in rounds.items()})
-    s.event('LL_join', 3, enc({'v': 1}))
+    s.event('LL_join', 3, enc({'v': PROTO}))
     out = s.drain()
     late = [s.decode(o[2]) for o in out if o[1] == 'LL_round']
     check(len(late) == 1 and late[0]['slot'] == 4 and late[0]['round'] == 2, 'arrivée pendant une livraison : place libre suivante', late)
@@ -238,17 +251,174 @@ def test_plugin():
     s.disconnect(3)
     out = s.drain()
     check(len([o for o in out if o[1] == 'LL_roundEnd']) == 2, 'joueur déconnecté : la livraison se termine sans lui', out)
-    s.event('LL_join', 3, enc({'v': 2}))
+    s.connect(3, 'Dan')
+    chat_before = len(values(s.lua.globals()['CHAT']))
+    s.event('LL_join', 3, enc({'v': PROTO}))
+    check(len(values(s.lua.globals()['CHAT'])) == chat_before, 'même version : pas de message')
+    s.event('LL_leave', 3, enc({}))
+    s.event('LL_join', 3, enc({'v': PROTO - 1}))
     check(any(c['id'] == 3 for c in values(s.lua.globals()['CHAT'])), 'version du mod différente : message au joueur')
     s.drain()
     for pid in range(10, 16):
         s.connect(pid, 'J%d' % pid)
-        s.event('LL_join', pid, enc({'v': 1}))
+        s.event('LL_join', pid, enc({'v': PROTO}))
     s.drain()
     s.connect(20, 'Neuvième')
-    s.event('LL_join', 20, enc({'v': 1}))
+    s.event('LL_join', 20, enc({'v': PROTO}))
     out = s.drain()
     check([o for o in out if o[1] == 'LL_full' and o[0] == 20], 'groupe complet (8) : le 9e est prévenu', out)
+
+
+def test_plugin_players():
+    print('-- plugin serveur : liste des joueurs, invitations')
+    s = Server()
+    for pid, name in ((0, 'Alice'), (1, 'Bob'), (2, 'Chloé')):
+        s.connect(pid, name)
+    enc = s.encode
+
+    def lists(out, to=None):
+        return [s.decode(o[2]) for o in out if o[1] == 'LL_playerList' and (to is None or o[0] == to)]
+
+    def people(lst):
+        return {p['name']: p['inGroup'] for p in values(lst['players'])}
+
+    s.event('LL_players', 0, enc({}))
+    out = s.drain()
+    ls = lists(out, 0)
+    check(len(out) == 1 and len(ls) == 1 and people(ls[0]) == {'Alice': False, 'Bob': False, 'Chloé': False},
+          'liste demandée : tous les joueurs, à celui qui demande', out)
+    s.event('LL_join', 0, enc({'v': PROTO}))
+    ls = lists(s.drain(), -1)
+    check(len(ls) == 1 and people(ls[0])['Alice'] is True, 'Alice rejoint le groupe : liste à jour pour tout le monde', ls)
+    s.event('LL_invite', 0, enc({'names': ['Bob', 'Inconnu', 'Alice']}))
+    out = s.drain()
+    inv = [(o[0], s.decode(o[2])) for o in out if o[1] == 'LL_invited']
+    check(len(inv) == 1 and inv[0][0] == 1 and inv[0][1]['name'] == 'Alice' and inv[0][1]['from'] == 0,
+          'invitation : seulement Bob (pas un inconnu, pas soi-même)', out)
+    s.event('LL_join', 1, enc({'v': PROTO}))
+    s.drain()
+    s.event('LL_invite', 0, enc({'names': ['Bob']}))
+    check(not s.drain(), 'Bob déjà dans le groupe : pas de nouvelle invitation')
+    s.event('LL_invite', 0, enc({}))
+    s.event('LL_invite', 0, 'pas du json')
+    check(not s.drain(), 'invitation illisible : ignorée')
+    s.connect(3, 'Dan')
+    s.event('onPlayerJoin', 3, None)
+    ls = lists(s.drain(), -1)
+    check(len(ls) == 1 and 'Dan' in people(ls[0]), 'arrivée de Dan : liste envoyée à tout le monde', ls)
+    s.disconnect(1)
+    ls = lists(s.drain(), -1)
+    check(len(ls) == 1 and 'Bob' not in people(ls[0]) and people(ls[0])['Alice'] is True,
+          'départ de Bob : liste sans lui', ls and people(ls[0]))
+    s.event('LL_leave', 0, enc({}))
+    ls = lists(s.drain(), -1)
+    check(len(ls) == 1 and people(ls[0])['Alice'] is False, 'Alice quitte le groupe : liste à jour', ls and people(ls[0]))
+
+    # invitation avec la demande de rejoindre : le groupe envoyé au chef dit qui il attend
+    s2 = Server()
+    for pid, name in ((0, 'Alice'), (1, 'Bob'), (2, 'Chloé')):
+        s2.connect(pid, name)
+    s2.event('LL_join', 0, s2.encode({'v': PROTO, 'invite': ['Bob']}))
+    out = s2.drain()
+    inv = [o[0] for o in out if o[1] == 'LL_invited']
+    grp = [s2.decode(o[2]) for o in out if o[1] == 'LL_group']
+    order = [o[1] for o in out]
+    check(inv == [1] and grp and values(grp[0]['invited']) == ['Bob'] and order.index('LL_invited') < order.index('LL_group'),
+          'rejoindre avec invitation : Bob invité avant l\'envoi du groupe, qui le dit en attente', order)
+    s2.event('LL_join', 1, s2.encode({'v': PROTO}))
+    grp = [s2.decode(o[2]) for o in s2.drain() if o[1] == 'LL_group']
+    check(grp and not values(grp[-1]['invited']), 'Bob arrive : plus personne en attente', grp and values(grp[-1]['invited']))
+    s2.event('LL_invite', 0, s2.encode({'names': ['Chloé']}))
+    grp = [s2.decode(o[2]) for o in s2.drain() if o[1] == 'LL_group']
+    check(grp and values(grp[-1]['invited']) == ['Chloé'], 'Chloé invitée en cours de route : groupe à jour', grp)
+    s2.disconnect(2)
+    grp = [s2.decode(o[2]) for o in s2.drain() if o[1] == 'LL_group']
+    check(grp and not values(grp[-1]['invited']), 'invitée déconnectée : le groupe ne l\'attend plus', grp)
+
+
+def test_invite():
+    print('-- jouer avec : les joueurs cochés reçoivent les livraisons sans rien faire')
+    server = Server()
+    names = {0: 'Alice', 1: 'Bob', 2: 'Chloé'}
+    for pid, name in names.items():
+        server.connect(pid, name)
+    a, b, c = (Client(pid, name, 300 * pid, 0) for pid, name in names.items())
+    net = Net(server, [a, b, c])
+    a.M.requestState()
+    net.pump()
+    mp = a.state()['mp']
+    check(mp is not None and mp['plugin'] is True and sorted(p['name'] for p in values(mp['players'])) == ['Bob', 'Chloé'],
+          'Plus : les autres joueurs du serveur (sans soi)', mp and [dict(p) for p in values(mp['players'])])
+    a.M.setMpInvite('Bob', True)
+    net.pump()
+    saved = a.saved_settings()
+    check(saved is not None and saved['mpInvite'] is not None and saved['mpInvite']['Bob'] is True, 'choix de Bob gardé (settings.json)')
+    check(b.phase() is None, 'Bob coché avant de lancer : rien ne se passe encore', b.phase())
+    a.M.start()
+    net.pump()
+    check(net.until(lambda: a.phase() == 'driving' and b.phase() == 'driving', limit=1500),
+          'Alice lance : la livraison démarre aussi chez Bob', (a.phase(), b.phase()))
+    log = net.log
+    first_propose = log.index(('c0', 'LL_propose')) if ('c0', 'LL_propose') in log else -1
+    bob_join = log.index(('c1', 'LL_join')) if ('c1', 'LL_join') in log else 10 ** 9
+    check(bob_join < first_propose, "Alice attend que Bob ait rejoint avant d'envoyer la 1re livraison", (bob_join, first_propose))
+    rounds_to_bob = [e for e in net.log if e == ('s>1', 'LL_round')]
+    check(len(rounds_to_bob) == 1 and b.g['M'] is not None, 'Bob : une seule livraison reçue (la 1re, avec Alice)', rounds_to_bob)
+    check(any('Alice joue avec toi' in m for m in b.messages()), 'Bob : message « Alice joue avec toi »', b.messages())
+    check(a.sess()['vehicle']['model'] == b.sess()['vehicle']['model'], 'Bob : même véhicule qu\'Alice')
+    check(dist2d(a.pos(), b.pos()) <= 8, 'Bob : départ à côté d\'Alice', round(dist2d(a.pos(), b.pos()), 1))
+    check(c.phase() is None, 'Chloé (pas cochée) : rien', c.phase())
+    pl = {p['name']: dict(p) for p in values(a.state()['mp']['players'])}
+    check(pl['Bob']['invited'] is True and pl['Bob']['inGroup'] is True and pl['Chloé']['invited'] is False,
+          'Plus : Bob coché et dans le groupe, Chloé non', pl)
+    a.M.setMpInvite('Chloé', True)
+    net.pump()
+    check(net.until(lambda: c.phase() == 'driving', limit=1500), 'Chloé cochée pendant la livraison : elle rejoint la livraison en cours',
+          c.phase())
+    check(c.sess()['vehicle']['model'] == a.sess()['vehicle']['model'], 'Chloé : même véhicule')
+    b.M.stop()
+    net.pump()
+    net.run(120)
+    check(b.phase() is None, 'Bob arrête : pas relancé tout seul', b.phase())
+    a.M.setMpInvite('Bob', False)
+    check(a.saved_settings()['mpInvite']['Bob'] is None, 'Bob décoché : choix retiré')
+    invites = [e for e in net.log if e[1] == 'LL_invite']
+    check(len(invites) == 1, 'une invitation à part (Chloé) ; celle de Bob partait avec la demande de rejoindre', invites)
+
+    # invité qui ne vient pas (son jeu ne répond pas) : le chef part au bout de 30 s
+    server = Server()
+    server.connect(0, 'Alice')
+    server.connect(1, 'Bob')
+    a = Client(0, 'Alice', 0, 0)
+    net = Net(server, [a])  # pas de mod chez Bob
+    a.M.setMpInvite('Bob', True)
+    a.M.start()
+    net.pump()
+    net.run(600)
+    check(a.phase() == 'waiting' and 'en attente de Bob' in (a.sess()['message'] or ''),
+          'invité absent : Alice attend encore après 10 s (« en attente de Bob »)', (a.phase(), a.sess()['message']))
+    check(net.until(lambda: a.phase() == 'driving', limit=2400), 'invité absent : Alice part seule au bout de 30 s', a.phase())
+
+
+def test_mp_traffic():
+    print('-- trafic du mod en multijoueur')
+    server = Server()
+    server.connect(0, 'Alice')
+    a = Client(0, 'Alice', 0, 0)
+    net = Net(server, [a])
+    a.M.setSettings(a.lua.table_from({'traffic': {'mode': 'on', 'amount': 4, 'parked': 2, 'police': 'off'}}, recursive=True))
+    a.M.start()
+    net.pump()
+    check(net.until(lambda: a.phase() == 'driving', limit=1500), 'livraison lancée', a.phase())
+    calls = values(a.g['ENV']['traffic']['calls'])
+    check(len(calls) == 1 and calls[0]['amount'] == 4 and calls[0]['parked'] == 2, 'trafic du mod créé en multijoueur',
+          [dict(cl) for cl in calls])
+    check(sum('MaxCars' in t for t in a.toasts()) == 1, 'message : le trafic compte dans la limite du serveur (une fois)', a.toasts())
+    a.M.stop()
+    net.pump()
+    a.M.applyTrafficNow()
+    check(len(values(a.g['ENV']['traffic']['calls'])) == 2, 'bouton « appliquer le trafic » : marche aussi en multijoueur')
+    check(sum('MaxCars' in t for t in a.toasts()) == 1, 'message MaxCars pas répété')
 
 
 def test_two_players():
@@ -379,7 +549,10 @@ def test_fallbacks():
 
 def main():
     test_plugin()
+    test_plugin_players()
     test_two_players()
+    test_invite()
+    test_mp_traffic()
     test_three_players()
     test_fallbacks()
     print('MULTI TESTS: %d passed, %d failed' % (passed, failed))
