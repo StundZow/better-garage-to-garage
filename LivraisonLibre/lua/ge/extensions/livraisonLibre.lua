@@ -14,7 +14,7 @@ local journal = require('/lua/ge/extensions/livraisonLibre/journal')
 local timing = require('/lua/ge/extensions/livraisonLibre/timing')
 local multi = require('/lua/ge/extensions/livraisonLibre/multi')
 
-local VERSION = '1.9.0'
+local VERSION = '1.10.0'
 local DATA_DIR = '/settings/livraisonLibre/'
 local DECAL_TEXTURE = 'art/shapes/interface/parkDecalStripes.png'
 -- réglages internes (regroupés : le fichier approche la limite de 200 variables locales de Lua)
@@ -270,7 +270,7 @@ local function writeJson(path, data)
   return ok
 end
 
-local function saveSettings() writeJson(K.SETTINGS_FILE, settings) end
+local function saveSettings() writeJson(K.SETTINGS_FILE, MPL.own or settings) end -- (mes réglages, pas ceux du chef)
 local function saveStats() writeJson(K.STATS_FILE, stats) end
 
 local function writeText(path, text)
@@ -1192,6 +1192,7 @@ local function stopSession(silent)
     if settings.traffic.mode == 'on' and settings.traffic.removeOnStop then trafficCtl.removeOwned() end
     endFade()
     MPL.leave()
+    MPL.restoreOwn()
   end
   clearVisuals()
   S = nil
@@ -1491,6 +1492,7 @@ local function doSpawn()
   -- trafic : appliqué une fois au lancement, autour de la nouvelle position
   if S.trafficPending then
     S.trafficPending = false
+    S.trafficApplied = true
     local res, msg = trafficCtl.apply(settings.traffic, levelName())
     if msg then toast(res == 'error' and 'err' or 'warn', msg) end
     S.waitTraffic = (res == 'waiting')
@@ -2188,7 +2190,68 @@ function MPL.listen()
     [E.result] = wrap('résultat', MPL.onResult), [E.roundEnd] = wrap('fin', MPL.onRoundEnd),
     [E.full] = wrap('complet', MPL.onFull),
     [E.playerList] = wrap('joueurs', MPL.onPlayerList), [E.invited] = wrap('invitation', MPL.onInvited),
+    [E.cfg] = wrap('réglages', MPL.onCfg), [E.stop] = wrap('arrêt', MPL.onStop),
   }) or MPL.listening
+end
+
+-- Réglages du groupe : ceux du chef (l'hôte). Il les envoie avec chaque livraison et à chaque changement
+-- pendant les livraisons ; les autres joueurs les appliquent à la place des leurs, gardés à part
+-- (MPL.own : ce sont eux qui restent sur le disque) et rendus à l'arrêt.
+function MPL.guest() return MPL.group() and not MPL.isLeader() end
+
+-- tout sauf l'état du panneau et les invitations, plus la police de la session (elle peut différer des
+-- réglages : police du jeu, changée depuis le panneau)
+function MPL.hostCfg()
+  local c = copyTable(settings)
+  c.ui, c.mpInvite, c.version = nil, nil, nil
+  return {settings = c, police = S and S.policeMode or nil}
+end
+
+-- live : changement pendant la livraison (difficulté du temps et police appliquées tout de suite)
+function MPL.applyHost(cfg, live)
+  if type(cfg) ~= 'table' or type(cfg.settings) ~= 'table' or not MPL.guest() then return end
+  local own = MPL.own or settings
+  local s = copyTable(DEFAULTS)
+  mergeInto(s, cfg.settings, DEFAULTS)
+  sanitizeSettings(s)
+  s.ui, s.mpInvite = own.ui, own.mpInvite
+  local before = settings
+  MPL.own, settings = own, s
+  if not S.trafficApplied then S.trafficPending = settings.traffic.mode ~= 'keep' end
+  setPoiHidden(settings.hidePoi)
+  local police = oneOf(cfg.police, {'off', 'patrol', 'wanted'}, nil)
+    or ((settings.traffic.mode == 'on') and settings.traffic.police or 'patrol')
+  if not live then
+    S.policeMode = police
+    return
+  end
+  if settings.timeLevel ~= before.timeLevel then M.setMissionTimeLevel(settings.timeLevel, true) end
+  if police ~= S.policeMode or settings.traffic.wantedLevel ~= before.traffic.wantedLevel then
+    M.setMissionPolice(police, settings.traffic.wantedLevel, true)
+  end
+end
+
+function MPL.restoreOwn()
+  if MPL.own then settings, MPL.own = MPL.own, nil end
+end
+
+-- (chef) réglage changé pendant les livraisons : envoyé au reste du groupe
+function MPL.shareCfg()
+  if MPL.isLeader() and #(S.mp.members or {}) > 1 then multi.send(multi.EV.cfg, {cfg = MPL.hostCfg()}) end
+end
+
+function MPL.onCfg(t)
+  if not MPL.guest() then return end
+  MPL.applyHost(t.cfg, true)
+  sendState()
+end
+
+-- l'hôte qui m'a invité s'est arrêté : je m'arrête aussi
+function MPL.onStop(t)
+  if not S then return end
+  local by = type(t.by) == 'string' and t.by or "L'hôte"
+  ui_message(by .. ' a arrêté les livraisons.', 6, 'livraisonLibreMp', 'info')
+  stopSession()
 end
 
 -- en partie BeamMP, écoute le serveur même sans livraison en cours (invitations, liste des joueurs)
@@ -2282,6 +2345,7 @@ function MPL.solo(msg)
   if not S or not S.mp then return end
   local pend = S.mp.pendingPlan
   MPL.leave() -- (si le serveur a fini par répondre, il ne compte plus sur ce joueur)
+  MPL.restoreOwn()
   S.mp.solo, S.mp.joinWait, S.mp.proposeWait, S.mp.pendingPlan = true, nil, nil, nil
   S.message = nil
   if msg then toast('warn', msg) end
@@ -2355,6 +2419,7 @@ function MPL.propose(info, plan)
     pickup = multi.packCand(plan.pickup), dest = multi.packCand(plan.dest),
     starts = slots(plan.pickup, plan.pickupZone), dests = slots(plan.dest, plan.destZone),
     dist = plan.dist or 0, relaxed = plan.relaxed or false, kindsRelaxed = plan.kindsRelaxed or false,
+    cfg = MPL.hostCfg(), -- tout le groupe joue avec les réglages du chef
   }
   S.mp.pendingPlan = {info = info, plan = plan}
   S.mp.proposeWait = K.MP_PROPOSE_WAIT
@@ -2410,6 +2475,7 @@ function MPL.onRound(t)
   S.mp.leader = tonumber(t.leader) or S.mp.leader
   S.mp.round = {id = tonumber(t.round), slot = slot}
   S.mp.results, S.mp.ended, S.mp.doneSent, S.mp.nextIn = {}, false, false, nil
+  MPL.applyHost(m.cfg)
   local info = MPL.vehicle(m.veh)
   if not info then toast('err', 'Aucun véhicule disponible.') return end
   S.message = nil
@@ -2514,7 +2580,8 @@ function MPL.uiInfo()
     if not pl.result and not pl.me then waiting[#waiting + 1] = pl.name end
   end
   return {leader = MPL.isLeader(), leaderName = MPL.leaderName(), players = players, waitingFor = waiting,
-    ended = S.mp.ended or false, nextIn = S.mp.nextIn and math.ceil(S.mp.nextIn) or nil}
+    ended = S.mp.ended or false, nextIn = S.mp.nextIn and math.ceil(S.mp.nextIn) or nil,
+    hostCfg = (MPL.own ~= nil and not MPL.isLeader()) or nil}
 end
 
 ---------------------------------------------------------------------------
@@ -2552,9 +2619,14 @@ function M.setSettings(newSettings)
 end
 
 -- Police réglée depuis le panneau pendant une livraison (et gardée pour les suivantes)
-function M.setMissionPolice(mode, level)
+function M.setMissionPolice(mode, level, fromHost)
   mode = oneOf(mode, {'off', 'patrol', 'wanted'}, nil)
   if not mode then return end
+  if not fromHost and MPL.guest() then
+    toast('info', 'En groupe, la police est réglée par le chef (' .. MPL.leaderName() .. ').')
+    sendState()
+    return
+  end
   level = floor(clamp(tonumber(level) or settings.traffic.wantedLevel or 1, 1, 5) + 0.5)
   settings.traffic.wantedLevel = level
   if settings.traffic.mode == 'on' then settings.traffic.police = mode end
@@ -2572,19 +2644,26 @@ function M.setMissionPolice(mode, level)
       trafficCtl.setPoliceMode(S.vehId, 'off', level, strict)
     end
   end
+  if not fromHost and MPL.group() then MPL.shareCfg() end
   sendState()
 end
 
 -- Difficulté du temps choisie depuis le panneau : appliquée à la livraison en cours tant que le chrono
 -- n'est pas lancé (avant la 1re accélération), et gardée pour les suivantes
-function M.setMissionTimeLevel(level)
+function M.setMissionTimeLevel(level, fromHost)
   if not timing.byId[level] then return end
+  if not fromHost and MPL.guest() then
+    toast('info', 'En groupe, la difficulté du temps est réglée par le chef (' .. MPL.leaderName() .. ').')
+    sendState()
+    return
+  end
   settings.timeLevel = level
   saveSettings()
   if S and S.phase == 'driving' and S.timeLimit and S.timePlan and not (S.m and S.m.moveAt) then
     S.timeLevel = level
     refreshTimeLimit()
   end
+  if not fromHost and MPL.group() then MPL.shareCfg() end
   sendState()
 end
 

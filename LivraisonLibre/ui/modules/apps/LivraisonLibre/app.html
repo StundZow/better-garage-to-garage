@@ -86,6 +86,7 @@
           <span class="ll-group-title">Groupe · {{ sess.multi.players.length }} joueur{{ sess.multi.players.length > 1 ? 's' : '' }}</span>
           <span class="ll-group-lead">{{ sess.multi.leader ? 'Tu choisis les livraisons' : ('Chef : ' + sess.multi.leaderName) }}</span>
         </div>
+        <div class="ll-hint" ng-if="sess.multi.hostCfg">Tu joues avec les réglages de {{ sess.multi.leaderName }} ; les tiens reviennent quand tu arrêtes.</div>
         <div class="ll-group-row" ng-repeat="p in sess.multi.players" ng-class="{'ll-group-me': p.me, 'll-group-ok': p.result === 'Livrée', 'll-group-ko': p.result && p.result !== 'Livrée'}">
           <span class="ll-group-rank">{{ p.rank ? p.rank + '.' : '' }}</span>
           <span class="ll-group-name">{{ p.me ? 'Toi' : p.name }}</span>
@@ -111,7 +112,7 @@
         <button class="ll-btn ll-btn-ghost ll-btn-small ll-flip" ng-if="sess.phase === 'driving' && hud.chronoState === 'wait'" ng-click="call('flipVehicle')" title="Tourner le véhicule dans l'autre sens, sur place (tant que tu n'as pas démarré)">↻ Retourner le véhicule</button>
 
         <!-- difficulté du temps : modifiable tant que le chrono n'est pas lancé -->
-        <div class="ll-mtime" ng-if="sess.timeLevelId && hud.chronoState === 'wait'">
+        <div class="ll-mtime" ng-if="sess.timeLevelId && hud.chronoState === 'wait' && !(sess.multi && !sess.multi.leader)">
           <div class="ll-slider ll-lvl" ng-class="'ll-lvl-' + ui.mTimeIdx">
             <div class="ll-slider-head"><span>Difficulté du temps</span><b>{{ timeLevelLabel(ui.mTimeIdx) }}</b></div>
             <input type="range" min="0" max="5" step="1" ng-model="ui.mTimeIdx" ng-change="missionTimeLevel()">
@@ -141,7 +142,7 @@
         </div>
 
         <!-- police réglable sans arrêter la livraison -->
-        <div class="ll-mpolice" ng-if="sess.police && !ui.collapsed">
+        <div class="ll-mpolice" ng-if="sess.police && !ui.collapsed && !(sess.multi && !sess.multi.leader)">
           <div class="ll-seg ll-seg-small">
             <button ng-class="{'ll-seg-on': sess.police.mode === 'off'}" ng-click="missionPolice('off')">Sans police</button>
             <button ng-class="{'ll-seg-on': sess.police.mode === 'patrol'}" ng-click="missionPolice('patrol')">Patrouilles</button>

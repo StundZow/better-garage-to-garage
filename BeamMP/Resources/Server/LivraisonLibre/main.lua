@@ -3,19 +3,20 @@
 -- livraison ; ce plugin la transmet à tout le groupe avec la place de chacun (départs et arrivées côte à
 -- côte). Quand tout le monde a fini (livrée, ratée ou passée), le chef lance la suivante.
 -- Un joueur peut aussi choisir (onglet Plus de l'app) les joueurs qui reçoivent ses livraisons : ce plugin
--- leur transmet l'invitation, et leur mod lance les livraisons tout seul.
+-- leur transmet l'invitation, et leur mod lance les livraisons tout seul. Tout le groupe joue avec les réglages
+-- du chef (envoyés avec chaque livraison, et à chaque changement) ; un invité s'arrête quand son hôte s'arrête.
 -- Installation sur le serveur : ce dossier dans Resources/Server/ (Resources/Server/LivraisonLibre/main.lua)
 -- et LivraisonLibre.zip dans Resources/Client/ (le serveur l'envoie aux joueurs).
 
-local PROTO = 2     -- version des messages (doit être la même que celle du mod)
+local PROTO = 3     -- version des messages (doit être la même que celle du mod)
 local MAX_SLOTS = 8 -- joueurs par groupe
 
-local members = {}  -- [id] = {name, order}
+local members = {}  -- [id] = {name, order, invitedBy = id de l'hôte qui l'a invité}
 local order = 0
 local leader = nil
 local round = nil   -- {id, mission, slots = {[id] = place}, pending = {[id] = true}, results = {}, ended}
 local roundSeq = 0
-local invited = {}  -- [id] = true : invité, pas encore dans le groupe (le chef l'attend pour la 1re livraison)
+local invited = {}  -- [id] = id de l'hôte : invité, pas encore dans le groupe (le chef l'attend pour la 1re livraison)
 
 local function decode(data)
   if type(data) ~= 'string' or data == '' then return nil end
@@ -86,7 +87,7 @@ local function inviteNames(fromId, names)
   local from = MP.GetPlayerName(fromId) or ('Joueur ' .. fromId)
   for _, p in ipairs(players()) do
     if p.id ~= fromId and wanted[p.name] and not members[p.id] then
-      invited[p.id] = true
+      invited[p.id] = fromId
       send(p.id, 'LL_invited', {from = fromId, name = from})
       n = n + 1
     end
@@ -126,7 +127,28 @@ local function remove(id)
     round.pending[id] = nil
     round.slots[id] = nil
   end
-  if leader == id then
+  -- les joueurs qu'il a invités s'arrêtent avec lui (ils jouaient avec ses réglages), et ceux qu'eux ont invités
+  local gone, i = {id}, 1
+  while gone[i] do
+    local host = gone[i]
+    for pid, h in pairs(invited) do
+      if h == host then invited[pid] = nil end -- invitations pas encore acceptées : annulées
+    end
+    for mid, m in pairs(members) do
+      if m.invitedBy == host then
+        members[mid] = nil
+        invited[mid] = nil
+        if round then
+          round.pending[mid] = nil
+          round.slots[mid] = nil
+        end
+        gone[#gone + 1] = mid
+        send(mid, 'LL_stop', {by = MP.GetPlayerName(host) or ('Joueur ' .. host)})
+      end
+    end
+    i = i + 1
+  end
+  if leader and not members[leader] then
     -- le suivant arrivé devient chef
     local l = list()
     leader = l[1] and l[1].id or nil
@@ -155,7 +177,7 @@ function LivraisonLibre_join(id, data)
       return
     end
     order = order + 1
-    members[id] = {name = MP.GetPlayerName(id) or d.name or ('Joueur ' .. id), order = order}
+    members[id] = {name = MP.GetPlayerName(id) or d.name or ('Joueur ' .. id), order = order, invitedBy = invited[id]}
   end
   invited[id] = nil
   if not leader or not members[leader] then leader = id end
@@ -193,6 +215,19 @@ end
 
 function LivraisonLibre_playerJoin(id)
   sendPlayers()
+end
+
+-- le chef a changé ses réglages pendant les livraisons : envoyés tout de suite au reste du groupe (et gardés
+-- avec la livraison en cours, pour ceux qui la rejoignent)
+function LivraisonLibre_cfg(id, data)
+  id = tonumber(id)
+  if not id or id ~= leader then return end
+  local d = decode(data)
+  if not d or type(d.cfg) ~= 'table' then return end
+  if round and type(round.mission) == 'table' then round.mission.cfg = d.cfg end
+  for mid in pairs(members) do
+    if mid ~= id then send(mid, 'LL_cfg', {cfg = d.cfg}) end
+  end
 end
 
 -- le chef envoie la livraison suivante : place 1 pour lui, puis dans l'ordre d'arrivée
@@ -238,6 +273,7 @@ MP.RegisterEvent('LL_propose', 'LivraisonLibre_propose')
 MP.RegisterEvent('LL_done', 'LivraisonLibre_done')
 MP.RegisterEvent('LL_players', 'LivraisonLibre_players')
 MP.RegisterEvent('LL_invite', 'LivraisonLibre_invite')
+MP.RegisterEvent('LL_cfg', 'LivraisonLibre_cfg')
 MP.RegisterEvent('onPlayerJoin', 'LivraisonLibre_playerJoin')
 MP.RegisterEvent('onPlayerDisconnect', 'LivraisonLibre_disconnect')
 print('[LivraisonLibre] plugin serveur chargé (messages v' .. PROTO .. ')')

@@ -14,7 +14,7 @@ ROOT = os.path.dirname(HERE)
 MOD = ROOT + '/LivraisonLibre'
 PLUGIN = ROOT + '/BeamMP/Resources/Server/LivraisonLibre/main.lua'
 
-PROTO = 2  # version des messages du mod et du plugin
+PROTO = 3  # version des messages du mod et du plugin
 
 passed = failed = 0
 
@@ -336,6 +336,43 @@ def test_plugin_players():
     check(grp and not values(grp[-1]['invited']), 'invitée déconnectée : le groupe ne l\'attend plus', grp)
 
 
+def test_plugin_host():
+    print('-- plugin serveur : réglages du chef relayés, invités qui suivent leur hôte')
+    s = Server()
+    for pid, name in ((0, 'Alice'), (1, 'Bob'), (2, 'Chloé'), (3, 'Dan')):
+        s.connect(pid, name)
+    enc = s.encode
+    s.event('LL_join', 0, enc({'v': PROTO, 'invite': ['Bob']}))
+    s.event('LL_join', 1, enc({'v': PROTO, 'invite': ['Dan']}))  # Bob, invité d'Alice, invite Dan
+    s.event('LL_join', 3, enc({'v': PROTO}))
+    s.event('LL_join', 2, enc({'v': PROTO}))  # Chloé vient d'elle-même
+    s.drain()
+    s.event('LL_propose', 0, enc({'level': 'x', 'cfg': {'settings': {'timeLevel': 'dur'}}}))
+    s.drain()
+    s.event('LL_cfg', 1, enc({'cfg': {'settings': {'timeLevel': 'facile'}}}))
+    check(not s.drain(), 'réglages envoyés par un autre que le chef : ignorés')
+    s.event('LL_cfg', 0, enc({'cfg': {'settings': {'timeLevel': 'impossible'}}}))
+    out = s.drain()
+    to = sorted(o[0] for o in out if o[1] == 'LL_cfg')
+    check(to == [1, 2, 3] and s.decode(out[0][2])['cfg']['settings']['timeLevel'] == 'impossible',
+          'réglages du chef : envoyés à tous les autres', to)
+    s.connect(4, 'Eve')
+    s.event('LL_join', 4, enc({'v': PROTO}))
+    late = [s.decode(o[2]) for o in s.drain() if o[1] == 'LL_round' and o[0] == 4]
+    check(late and late[0]['mission']['cfg']['settings']['timeLevel'] == 'impossible',
+          'arrivée en cours de livraison : réglages à jour du chef', late and late[0]['mission']['cfg'])
+    s.event('LL_leave', 0, enc({}))
+    out = s.drain()
+    stops = sorted(o[0] for o in out if o[1] == 'LL_stop')
+    grp = [s.decode(o[2]) for o in out if o[1] == 'LL_group']
+    names = sorted(m['name'] for m in values(grp[-1]['members'])) if grp else None
+    check(stops == [1, 3], "Alice s'arrête : Bob (son invité) et Dan (invité de Bob) aussi", stops)
+    check(names == ['Chloé', 'Eve'] and grp[-1]['leader'] == 2, 'Chloé et Eve (venues seules) continuent, Chloé chef',
+          (names, grp and grp[-1]['leader']))
+    first = s.decode([o for o in out if o[1] == 'LL_stop'][0][2])
+    check(first['by'] in ('Alice', 'Bob'), "message d'arrêt : le nom de l'hôte", first)
+
+
 def test_invite():
     print('-- jouer avec : les joueurs cochés reçoivent les livraisons sans rien faire')
     server = Server()
@@ -398,6 +435,64 @@ def test_invite():
     check(a.phase() == 'waiting' and 'en attente de Bob' in (a.sess()['message'] or ''),
           'invité absent : Alice attend encore après 10 s (« en attente de Bob »)', (a.phase(), a.sess()['message']))
     check(net.until(lambda: a.phase() == 'driving', limit=2400), 'invité absent : Alice part seule au bout de 30 s', a.phase())
+
+
+def test_shared_settings():
+    print("-- réglages partagés : l'invité joue avec ceux de l'hôte, même quand il les change")
+    server = Server()
+    server.connect(0, 'Alice')
+    server.connect(1, 'Bob')
+    a, b = Client(0, 'Alice', 0, 0), Client(1, 'Bob', 300, 0)
+    net = Net(server, [a, b])
+    a.M.setSettings(a.lua.table_from({'timeLevel': 'dur', 'validation': 'auto', 'zoneScale': 1.6,
+                                      'traffic': {'mode': 'on', 'amount': 5, 'parked': 0, 'police': 'off'}}, recursive=True))
+    b.M.setSettings(b.lua.table_from({'timeLevel': 'facile', 'validation': 'handbrake', 'zoneScale': 1.3}, recursive=True))
+    a.M.setMpInvite('Bob', True)
+    a.M.start()
+    net.pump()
+    check(net.until(lambda: a.phase() == 'driving' and b.phase() == 'driving', limit=1500), 'livraison à deux lancée',
+          (a.phase(), b.phase()))
+    sb = b.state()['settings']
+    check(sb['timeLevel'] == 'dur' and sb['validation'] == 'auto' and abs(sb['zoneScale'] - 1.6) < 1e-6,
+          "Bob : réglages d'Alice (temps, validation, taille de zone)", (sb['timeLevel'], sb['validation'], sb['zoneScale']))
+    check(b.sess()['timeLevelId'] == 'dur', "Bob : temps limite à la difficulté d'Alice", b.sess()['timeLevelId'])
+    calls = values(b.g['ENV']['traffic']['calls'])
+    check(len(calls) == 1 and calls[0]['amount'] == 5, "Bob : trafic avec les réglages d'Alice", [dict(c) for c in calls])
+    check(b.saved_settings()['timeLevel'] == 'facile', 'Bob : ses propres réglages restent sur le disque',
+          b.saved_settings()['timeLevel'])
+    check(b.sess()['multi']['hostCfg'] is True and a.sess()['multi']['hostCfg'] is None, "panneau de Bob : « réglages d'Alice »")
+    # Alice change la difficulté avant de démarrer : Bob suit tout de suite
+    a.M.setMissionTimeLevel('impossible')
+    net.pump()
+    b.frames(2)
+    check(b.state()['settings']['timeLevel'] == 'impossible' and b.sess()['timeLevelId'] == 'impossible',
+          "Alice change la difficulté : celle de Bob change aussi", (b.state()['settings']['timeLevel'], b.sess()['timeLevelId']))
+    a.M.setMissionPolice('patrol', 3)
+    net.pump()
+    sb = b.state()['settings']['traffic']
+    check(sb['police'] == 'patrol' and sb['wantedLevel'] == 3, 'Alice change la police : Bob aussi', (sb['police'], sb['wantedLevel']))
+    # Bob ne peut pas changer les réglages du groupe
+    b.M.setMissionTimeLevel('tres_facile')
+    net.pump()
+    check(b.state()['settings']['timeLevel'] == 'impossible' and any('chef' in t for t in b.toasts()),
+          'Bob : difficulté réglée par le chef (message)', b.state()['settings']['timeLevel'])
+    check(b.saved_settings()['timeLevel'] == 'facile', 'Bob : ses réglages sur le disque, toujours les siens')
+    # Alice arrête : Bob s'arrête aussi et retrouve ses réglages
+    a.M.stop()
+    net.pump()
+    check(b.phase() is None and any('Alice a arrêté' in m for m in b.messages()), "Alice arrête : Bob aussi (message)", b.phase())
+    sb = b.state()['settings']
+    check(sb['timeLevel'] == 'facile' and sb['validation'] == 'handbrake' and abs(sb['zoneScale'] - 1.3) < 1e-6,
+          'Bob : ses réglages reviennent', (sb['timeLevel'], sb['validation'], sb['zoneScale']))
+    # Alice change un réglage hors livraison et relance : Bob repart avec le nouveau
+    a.M.setSettings(a.lua.table_from({'timeLevel': 'tres_dur'}, recursive=True))
+    a.M.start()
+    net.pump()
+    check(net.until(lambda: a.phase() == 'driving' and b.phase() == 'driving', limit=1500), 'relance : Bob repart avec Alice',
+          (a.phase(), b.phase()))
+    check(b.state()['settings']['timeLevel'] == 'tres_dur', "relance : nouveau réglage d'Alice chez Bob",
+          b.state()['settings']['timeLevel'])
+    check(a.saved_settings()['timeLevel'] == 'tres_dur', "Alice : ses réglages à elle, enregistrés normalement")
 
 
 def test_mp_traffic():
@@ -551,7 +646,9 @@ def main():
     test_plugin()
     test_plugin_players()
     test_two_players()
+    test_plugin_host()
     test_invite()
+    test_shared_settings()
     test_mp_traffic()
     test_three_players()
     test_fallbacks()
